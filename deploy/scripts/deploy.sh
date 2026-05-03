@@ -11,7 +11,7 @@ set -euo pipefail
 
 DEPLOY_ROOT="${DEPLOY_ROOT:-/home/animnia/wavesynagent}"
 STAGE_DIR="${STAGE_DIR:-/tmp/wavesyn-stage}"
-FRONTEND_DIR="${DEPLOY_ROOT}/frontend"
+FRONTEND_DIR="${FRONTEND_DIR:-/var/www/wavesynagent}"
 AGENT_DIR="${DEPLOY_ROOT}/agent-server"
 
 if [[ ! -d "${STAGE_DIR}" ]]; then
@@ -33,14 +33,14 @@ rsync -a --delete \
   --exclude='*.pyc' \
   "${STAGE_DIR}/agent-server/" "${AGENT_DIR}/"
 
-echo "==> Ensuring Python venv"
+echo "==> Ensuring Python venv (uv-managed Python 3.11)"
+export PATH="${HOME}/.local/bin:${PATH}"
 if [[ ! -x "${AGENT_DIR}/.venv/bin/python" ]]; then
-  python3.11 -m venv "${AGENT_DIR}/.venv"
+  uv venv --python 3.11 "${AGENT_DIR}/.venv"
 fi
 
 echo "==> Installing/updating Python deps"
-"${AGENT_DIR}/.venv/bin/pip" install --upgrade pip wheel >/dev/null
-"${AGENT_DIR}/.venv/bin/pip" install -e "${AGENT_DIR}"
+uv pip install --python "${AGENT_DIR}/.venv/bin/python" -e "${AGENT_DIR}"
 
 echo "==> Restarting agent service"
 sudo systemctl restart wavesyn-agent.service

@@ -8,7 +8,7 @@ set -euo pipefail
 DEPLOY_USER="${DEPLOY_USER:-animnia}"
 DEPLOY_ROOT="${DEPLOY_ROOT:-/home/${DEPLOY_USER}/wavesynagent}"
 REPO_DIR="${DEPLOY_ROOT}/repo"
-FRONTEND_DIR="${DEPLOY_ROOT}/frontend"
+FRONTEND_DIR="${FRONTEND_DIR:-/var/www/wavesynagent}"
 AGENT_DIR="${DEPLOY_ROOT}/agent-server"
 
 if [[ $EUID -ne 0 ]]; then
@@ -19,14 +19,27 @@ fi
 echo "==> Installing system packages"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  nginx \
-  python3.11 python3.11-venv python3.11-dev \
+  software-properties-common \
+  rsync curl ca-certificates \
   build-essential \
-  rsync curl ca-certificates
+  nginx
+
+# Python 3.11+ is required by agent-server. Ubuntu 22.04 only ships 3.10 and
+# the deadsnakes PPA is not reliably reachable from this VM. Use `uv` to
+# install a standalone Python build under the deploy user.
+if ! sudo -u "${DEPLOY_USER}" bash -lc 'command -v uv' >/dev/null 2>&1; then
+  echo "==> Installing uv for ${DEPLOY_USER}"
+  sudo -u "${DEPLOY_USER}" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+fi
+echo "==> Ensuring Python 3.11 via uv"
+sudo -u "${DEPLOY_USER}" bash -lc 'export PATH="$HOME/.local/bin:$PATH" && uv python install 3.11'
 
 echo "==> Creating directories"
 install -d -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" \
-  "${DEPLOY_ROOT}" "${REPO_DIR}" "${FRONTEND_DIR}" "${AGENT_DIR}"
+  "${DEPLOY_ROOT}" "${REPO_DIR}" "${AGENT_DIR}"
+# Frontend dir lives under /var/www so nginx can read it. Owned by deploy user
+# so rsync from the GitHub Actions deploy doesn't need root.
+install -d -o "${DEPLOY_USER}" -g "${DEPLOY_USER}" -m 0755 "${FRONTEND_DIR}"
 
 # Seed an empty .env if not present so systemd EnvironmentFile= doesn't fail.
 if [[ ! -f "${AGENT_DIR}/.env" ]]; then
@@ -48,8 +61,9 @@ DEPLOY_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 install -m 0644 "${DEPLOY_REPO_DIR}/nginx/upgrade-map.conf"  /etc/nginx/conf.d/upgrade-map.conf
 install -m 0644 "${DEPLOY_REPO_DIR}/nginx/wavesynagent.conf" /etc/nginx/sites-available/wavesynagent
 ln -sf /etc/nginx/sites-available/wavesynagent /etc/nginx/sites-enabled/wavesynagent
-# Disable default site if present so our default_server takes over.
-rm -f /etc/nginx/sites-enabled/default
+# NOTE: Intentionally NOT removing /etc/nginx/sites-enabled/default — the
+# metagaruta site relies on it. Our site uses an explicit server_name so they
+# coexist on port 80.
 
 nginx -t
 systemctl enable --now nginx
