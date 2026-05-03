@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  presets       Preset[]
+  projects      Project[]
+  agentSessions AgentSession[]
+
+  @@map("users")
+}
+
+model Preset {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  tags      String[] @default([])
+  isPublic  Boolean  @default(false) @map("is_public")
+  synthState Json    @map("synth_state")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isPublic])
+  @@map("presets")
+}
+
+model Project {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  name           String
+  synthState     Json     @map("synth_state")
+  sequencerState Json?    @map("sequencer_state")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentSessions AgentSession[]
+
+  @@index([userId])
+  @@map("projects")
+}
+
+model AgentSession {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  projectId String?  @map("project_id")
+  provider  String   @default("openai")
+  model     String   @default("gpt-4o")
+  messages  Json     @default("[]")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([projectId])
+  @@map("agent_sessions")
+}

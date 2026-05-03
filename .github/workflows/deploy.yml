@@ -1,0 +1,138 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      DEPLOY_USER: animnia
+      DEPLOY_HOST: 20.243.161.134
+      DEPLOY_ROOT: /home/animnia/wavesynagent
+      STAGE_DIR: /tmp/wavesyn-stage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+          run_install: false
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Install frontend dependencies
+        working-directory: packages/frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: packages/frontend
+        run: pnpm run build
+
+      - name: Setup SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Stage artifacts on server
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          RSYNC_RSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+
+          # Reset stage dir
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf $STAGE_DIR && mkdir -p $STAGE_DIR/frontend $STAGE_DIR/agent-server"
+
+          # Frontend dist
+          rsync -az --delete -e "$RSYNC_RSH" \
+            packages/frontend/dist/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$STAGE_DIR/frontend/"
+
+          # Agent-server source (no .venv, no caches)
+          rsync -az --delete -e "$RSYNC_RSH" \
+            --exclude='.venv/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='.pytest_cache/' \
+            --exclude='.ruff_cache/' \
+            packages/agent-server/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$STAGE_DIR/agent-server/"
+
+          # Deploy scripts (so server can self-update bootstrap/deploy.sh from main)
+          rsync -az -e "$RSYNC_RSH" \
+            deploy/ \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_ROOT/repo-deploy/"
+
+      - name: Write .env on server
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          DEFAULT_PROVIDER: ${{ vars.DEFAULT_PROVIDER || 'deepseek' }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          # Build env file locally then ship it (avoids quoting hell over ssh).
+          ENV_TMP=$(mktemp)
+          {
+            echo "HOST=127.0.0.1"
+            echo "PORT=3002"
+            echo "DEFAULT_PROVIDER=$DEFAULT_PROVIDER"
+            [ -n "$DEEPSEEK_API_KEY"  ] && echo "DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY"
+            [ -n "$OPENAI_API_KEY"    ] && echo "OPENAI_API_KEY=$OPENAI_API_KEY"
+            [ -n "$ANTHROPIC_API_KEY" ] && echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY"
+            [ -n "$DASHSCOPE_API_KEY" ] && echo "DASHSCOPE_API_KEY=$DASHSCOPE_API_KEY"
+          } > "$ENV_TMP"
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$ENV_TMP" \
+            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_ROOT/agent-server/.env.new"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "
+            mv $DEPLOY_ROOT/agent-server/.env.new $DEPLOY_ROOT/agent-server/.env &&
+            chmod 600 $DEPLOY_ROOT/agent-server/.env
+          "
+          rm -f "$ENV_TMP"
+
+      - name: Run deploy script
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "
+            chmod +x $DEPLOY_ROOT/repo-deploy/scripts/deploy.sh &&
+            DEPLOY_ROOT=$DEPLOY_ROOT STAGE_DIR=$STAGE_DIR \
+              bash $DEPLOY_ROOT/repo-deploy/scripts/deploy.sh
+          "
+
+      - name: Smoke test
+        run: |
+          for i in 1 2 3 4 5; do
+            if curl -fsS "http://$DEPLOY_HOST/agent-api/health" >/dev/null; then
+              echo "Service is healthy."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Service did not become healthy in time." >&2
+          exit 1

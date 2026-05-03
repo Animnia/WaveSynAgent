@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Database
+*.db
+
+# Coverage
+coverage/
+.nyc_output/

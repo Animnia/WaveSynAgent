@@ -1,0 +1,60 @@
+{
+  "text": "好的！来做一个经典的 Pluck Lead。先一次性把所有参数到位，然后直接听效果。\n参数就位，来听一下——\n这就是你的 **Pluck Lead** 声音了！🎹\n\n我做了什么调整：\n\n| 参数 | 之前 | 之后 | 原因 |\n|------|------|------|------|\n| OSC1 type | sine | **square** | 方波泛音丰富，有\"咬合感\" |\n| OSC1 vol | 0.50 | **0.60** | 稍微推大，lead需要突出 |\n| Filter | ? | **lowpass 3000Hz** | 削掉刺耳高频，保留亮度 |\n| Attack | 0.010 | **0.003s** | 极快起音，拨弦感 |\n| Decay | 0.200 | **0.15s** | 快速衰减主体 |\n| Sustain | 0.70 | **0.08** | 几乎没有保持，拨完就落 |\n| Release | 0.500 | **0.12s** | 短促收尾，干净利落 |\n\n这个音色核心思路：**方波 → 低通剪高频 → 快速弹跳感 envelope**。适合做短促的旋律线或节奏型 riff。想要加点混响让它在混音里更有空间感吗？",
+  "mutations": [
+    {
+      "path": "oscillators.0.type",
+      "value": "square"
+    },
+    {
+      "path": "oscillators.0.volume",
+      "value": 0.6
+    },
+    {
+      "path": "filter.type",
+      "value": "lowpass"
+    },
+    {
+      "path": "filter.cutoff",
+      "value": 3000
+    },
+    {
+      "path": "filter.resonance",
+      "value": 0.15
+    },
+    {
+      "path": "ampEnvelope.attack",
+      "value": 0.003
+    },
+    {
+      "path": "ampEnvelope.decay",
+      "value": 0.15
+    },
+    {
+      "path": "ampEnvelope.sustain",
+      "value": 0.08
+    },
+    {
+      "path": "ampEnvelope.release",
+      "value": 0.12
+    }
+  ],
+  "play_commands": [],
+  "thinking": [
+    {
+      "tool": "set_oscillator",
+      "args": "{'index': 0, 'type': 'square', 'volume': 0.6}"
+    },
+    {
+      "tool": "set_filter",
+      "args": "{'type': 'lowpass', 'cutoff': 3000, 'resonance': 0.15}"
+    },
+    {
+      "tool": "set_envelope",
+      "args": "{'type': 'amp', 'attack': 0.003, 'decay': 0.15, 'sustain': 0.08, 'release': 0.12}"
+    },
+    {
+      "tool": "play_notes",
+      "args": "{'notes': [60], 'duration': 0.5}"
+    }
+  ]
+}

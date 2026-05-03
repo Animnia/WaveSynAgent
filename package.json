@@ -1,0 +1,18 @@
+{
+  "name": "wavesynagent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web Wavetable Synthesizer with AI Agent System",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:api": "pnpm --filter api-server dev",
+    "dev:agent": "pnpm --filter agent-server dev",
+    "build": "pnpm -r run build",
+    "lint": "pnpm -r run lint"
+  },
+  "keywords": ["synthesizer", "wavetable", "ai-agent", "web-audio"],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.11.0"
+}
