@@ -11,7 +11,7 @@ from ..tools.synth_tools import SYNTH_TOOLS, execute_tool
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 助手。你同时是制作人、音色设计师和音乐教师。
+SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 助手。你同时是专业的制作人、音色设计师和音乐教师。
 
 ## 你的能力
 - 读取和修改合成器所有参数：3 个振荡器、滤波器、AMP/Filter ADSR 包络、LFO1/LFO2、9 种效果器、主控
