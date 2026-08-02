@@ -1,5 +1,9 @@
 # WaveSynAgent
 
+**🌐 在线体验：<https://wavesynagent.metagaruta.com>**
+
+[English](README.en.md) | **中文**
+
 **Web 波表合成器 + AI Agent 系统** —— 在浏览器里演奏、调音，并让 AI 助手帮你设计音色。
 
 核心亮点：内置基于 **ReAct 模式** 的 AI Agent，能理解"温暖的 Pad"、"沉重的 Bass"这类自然语言描述，自主调用合成器工具完成调参、试听和预设保存，同时兼任制作人与音乐教师。
@@ -47,7 +51,7 @@ WaveSynAgent/
 │   │       └── visualizers/   # 示波器、频谱
 │   ├── api-server/        # Fastify + Prisma：用户/预设/项目 CRUD、JWT、WebSocket
 │   └── agent-server/      # FastAPI：ReAct Agent 核心、工具集、LLM 抽象层
-├── deploy/                # nginx / systemd / 部署脚本（详见 deploy/README.md）
+├── deploy/                # nginx / systemd / 部署脚本（gitignore，本地维护）
 └── .github/workflows/     # push 到 main/master 自动部署
 ```
 
@@ -76,9 +80,9 @@ pnpm dev:agent        # Agent 服务 → http://localhost:8000
 
 ## 部署
 
-生产部署通过 GitHub Actions 自动化：push 到 `main`/`master` 后构建前端静态文件，rsync 到服务器，由 nginx 提供前端并反代 `/agent-api/*` 到 FastAPI（systemd 守护）。
+生产部署通过 GitHub Actions 自动化：push 到 `main`/`master` 后构建前端静态文件，rsync 到服务器，由 nginx 提供前端（Cloudflare 代理）并反代 `/agent-api/*` 到 FastAPI（systemd 守护）。线上地址 **<https://wavesynagent.metagaruta.com>**。
 
-完整步骤（服务器初始化、Secrets 配置、运维命令）见 **[deploy/README.md](deploy/README.md)**。
+完整运维手册（服务器初始化、Secrets 配置、排障）见 `deploy/README.md`（本地维护，不纳入 git 跟踪）。
 
 ## License
 
