@@ -83,10 +83,10 @@ jobs:
             packages/agent-server/ \
             "$DEPLOY_USER@$DEPLOY_HOST:$STAGE_DIR/agent-server/"
 
-          # Deploy scripts (so server can self-update bootstrap/deploy.sh from main)
-          rsync -az -e "$RSYNC_RSH" \
-            deploy/ \
-            "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_ROOT/repo-deploy/"
+          # NOTE: deploy/ is intentionally NOT tracked in git (server-specific ops
+          # assets, see .gitignore). The server keeps its own copy at
+          # $DEPLOY_ROOT/repo-deploy/ — update it manually (scp/rsync) on the rare
+          # occasion that the deploy scripts or nginx configs change.
 
       - name: Write .env on server
         env:
@@ -127,12 +127,23 @@ jobs:
 
       - name: Smoke test
         run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes"
+          # Public entry is https://wavesynagent.metagaruta.com via Cloudflare;
+          # direct-IP access to the origin returns 444 by design. Check the origin
+          # through nginx on the server itself with an explicit Host header.
           for i in 1 2 3 4 5; do
-            if curl -fsS "http://$DEPLOY_HOST/agent-api/health" >/dev/null; then
-              echo "Service is healthy."
+            if $SSH "$DEPLOY_USER@$DEPLOY_HOST" \
+              "curl -fsS -H 'Host: wavesynagent.metagaruta.com' http://127.0.0.1/agent-api/health" >/dev/null; then
+              echo "Service is healthy (origin via nginx)."
               exit 0
             fi
             sleep 2
           done
           echo "Service did not become healthy in time." >&2
           exit 1
+
+      - name: Verify public entry (informational)
+        run: |
+          curl -fsS --max-time 20 "https://wavesynagent.metagaruta.com/agent-api/health" \
+            && echo "Public entry OK." \
+            || echo "::warning::Public entry unreachable — origin is healthy, check Cloudflare/DNS."
