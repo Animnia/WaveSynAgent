@@ -1,9 +1,19 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
 build/
+
+# Environment & secrets
 .env
 .env.local
+*.pem
+
+# Logs
 *.log
+
+# OS
 .DS_Store
 Thumbs.db
 
@@ -24,3 +34,9 @@ __pycache__/
 # Coverage
 coverage/
 .nyc_output/
+
+# Deployment configs (server-specific, maintained locally)
+deploy/
+
+# Test artifacts
+test_result*.json
