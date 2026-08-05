@@ -152,6 +152,18 @@ export default function OscillatorPanel({ index }: OscillatorPanelProps) {
           unit="ct"
           onChange={(v) => update(index, { unisonSpread: v })}
         />
+        {index === 0 && (
+          <Knob
+            label="FM 2→1"
+            value={osc.fmAmount}
+            min={0}
+            max={1}
+            step={0.01}
+            size={48}
+            color="var(--color-accent-red)"
+            onChange={(v) => update(index, { fmAmount: v })}
+          />
+        )}
       </div>
     </div>
   );

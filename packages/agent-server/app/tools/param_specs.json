@@ -87,6 +87,13 @@
       "max": 100
     },
     {
+      "path": "oscillators.0.fmAmount",
+      "type": "number",
+      "label": "FM depth (OSC2→OSC1)",
+      "min": 0,
+      "max": 1
+    },
+    {
       "path": "filter.enabled",
       "type": "boolean",
       "label": "Filter enabled"

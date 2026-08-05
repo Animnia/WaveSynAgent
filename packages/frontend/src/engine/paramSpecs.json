@@ -13,6 +13,7 @@
     { "path": "oscillators.*.pan",            "type": "number",  "label": "OSC pan",           "min": -1,    "max": 1 },
     { "path": "oscillators.*.unison",         "type": "integer", "label": "OSC unison voices", "min": 1,     "max": 8 },
     { "path": "oscillators.*.unisonSpread",   "type": "number",  "label": "OSC unison spread (cents)", "min": 0, "max": 100 },
+    { "path": "oscillators.0.fmAmount",       "type": "number",  "label": "FM depth (OSC2→OSC1)", "min": 0, "max": 1 },
 
     { "path": "filter.enabled",               "type": "boolean", "label": "Filter enabled" },
     { "path": "filter.type",                  "type": "enum",    "label": "Filter type", "values": ["lowpass", "highpass", "bandpass", "notch"] },

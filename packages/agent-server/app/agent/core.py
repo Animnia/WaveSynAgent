@@ -40,7 +40,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
    - duration 通常 0.5-1.5s, interval 0.2-0.5s
 
 ## 参数范围速查
-- Oscillator: type ∈ {sine, triangle, sawtooth, square, custom(波表)} | wavetable ∈ {morph, formant, digital, soft}（仅 custom 生效） | wavetablePosition 0-1（波表帧间 morph） | Volume 0-1 | Semitone ±24 | Fine ±100 cents | Unison 1-8
+- Oscillator: type ∈ {sine, triangle, sawtooth, square, custom(波表)} | wavetable ∈ {morph, formant, digital, soft}（仅 custom 生效） | wavetablePosition 0-1（波表帧间 morph） | Volume 0-1 | Semitone ±24 | Fine ±100 cents | Unison 1-8 | fmAmount 0-1（仅 OSC1 生效：OSC2→OSC1 音频级 FM，0.1-0.3 细腻咆哮，0.4+ 金属/钟声）
 - Filter: type ∈ {lowpass, highpass, bandpass, notch} | cutoff 20-20000 Hz | resonance 0-1
 - ADSR: Attack/Decay 0.001-5s | Sustain 0-1 | Release 0.001-10s
 - LFO: rate 0.01-50 Hz | depth 0-1 | target ∈ {filterCutoff, volume, pitch, pan}

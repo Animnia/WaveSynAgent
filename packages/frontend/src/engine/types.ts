@@ -21,6 +21,9 @@ export interface OscillatorState {
   fine: number;
   /** Volume 0-1 */
   volume: number;
+  /** FM depth 0-1 — on OSC 1 only: audio-rate FM from OSC 2 into OSC 1's
+   *  frequency (deviation = amount × carrier freq × 2). Ignored elsewhere. */
+  fmAmount: number;
   /** Pan -1 to 1 */
   pan: number;
   /** Unison voices count */

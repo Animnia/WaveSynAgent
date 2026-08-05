@@ -35,6 +35,8 @@ interface VoiceUnit {
   /** Current morph frame pair (wavetable mode; -1 = n/a for basic types). */
   frameA: number;
   frameB: number;
+  /** FM depth node (carrier units only): modulator signal → osc frequency. */
+  fmGain?: Tone.Gain;
 }
 
 interface Voice {
@@ -700,6 +702,11 @@ export class AudioEngine {
             );
           }
           unit.panner.pan.setTargetAtTime(clamp(oscState.pan + panOffset, -1, 1), now, 0.03);
+          // Live FM depth update (units created with fmAmount=0 have no
+          // node yet — they keep their birth timbre until the next note).
+          if (oscIdx === 0 && unit.fmGain) {
+            unit.fmGain.gain.setTargetAtTime(oscState.fmAmount * freq * 2, now, 0.03);
+          }
         }
       }
     }
@@ -810,6 +817,7 @@ export class AudioEngine {
         osc.dispose();
       });
       unit.panner.dispose();
+      unit.fmGain?.dispose();
     }
     voice.gain.dispose();
     voice.ampEnvelope.dispose();
@@ -845,6 +853,21 @@ export class AudioEngine {
     }
     ampEnv.connect(gain);
     gain.connect(this.filter);
+
+    // FM: OSC2 → OSC1 (audio-rate). Post-volume tap, so OSC2's level acts
+    // as the modulation index. Unison pairs are matched round-robin.
+    const fmAmount = state.oscillators[0].fmAmount;
+    const carrierUnits = units.filter((u) => u.oscIndex === 0);
+    const modUnits = units.filter((u) => u.oscIndex === 1);
+    if (fmAmount > 0 && carrierUnits.length > 0 && modUnits.length > 0) {
+      carrierUnits.forEach((cu, i) => {
+        const mu = modUnits[i % modUnits.length];
+        const fmGain = new Tone.Gain(fmAmount * frequency * 2);
+        for (const osc of mu.oscs) osc.connect(fmGain);
+        for (const osc of cu.oscs) fmGain.connect(osc.frequency);
+        cu.fmGain = fmGain;
+      });
+    }
 
     for (const unit of units) {
       for (const osc of unit.oscs) osc.start();

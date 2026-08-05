@@ -83,6 +83,12 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                         "maximum": 1,
                         "description": "Morph position through the wavetable frames (0=first frame, 1=last)",
                     },
+                    "fmAmount": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "FM depth (only effective on index 0): audio-rate FM from OSC2 into OSC1. 0.1-0.3 subtle growl, 0.4+ metallic/bell-like",
+                    },
                     "volume": {"type": "number", "minimum": 0, "maximum": 1},
                     "semitone": {"type": "integer", "minimum": -24, "maximum": 24},
                     "fine": {"type": "integer", "minimum": -100, "maximum": 100},
