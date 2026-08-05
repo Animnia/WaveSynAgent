@@ -9,6 +9,7 @@ import {
 import type { AgentMessage, Mutation, PlayCommand } from '@/stores/agentStore';
 import { useSynthStore } from '@/stores/synthStore';
 import { usePresetStore } from '@/stores/presetStore';
+import { useSequencerStore } from '@/stores/sequencerStore';
 import { getAudioEngine } from '@/engine/AudioEngine';
 import { captureAudioFeatures } from '@/engine/audioAnalysis';
 import AgentHistoryDrawer from './AgentHistoryDrawer';
@@ -89,7 +90,17 @@ export default function AgentPanel() {
     const msg = input.trim();
     if (!msg || isLoading) return;
     setInput('');
-    await streamMessage(msg, synthState, {
+    // Attach a compact sequencer snapshot so the agent can read/edit the
+    // pattern in context (extra key is ignored by the mutation applier).
+    const seq = useSequencerStore.getState();
+    const statePayload = Object.assign({}, synthState, {
+      sequencer: {
+        playing: seq.playing,
+        steps: seq.pattern.steps,
+        notes: seq.pattern.notes,
+      },
+    }) as typeof synthState;
+    await streamMessage(msg, statePayload, {
       onMutation: applyMutation,
       onPlay: handlePlay,
       onSavePreset: ({ name, tags }) => {
@@ -117,6 +128,20 @@ export default function AgentPanel() {
         const duration = Math.min(3, Math.max(0.5, Number(req.duration) || 1.5));
         handlePlay({ notes, velocity: 100, duration, mode: 'chord' });
         return captureAudioFeatures(getAudioEngine(), duration * 1000);
+      },
+      onSequencerPattern: (payload) => {
+        const store = useSequencerStore.getState();
+        store.setPatternFromAgent(payload);
+        store.setPanelOpen(true); // let the user see what the agent wrote
+      },
+      onSequencerControl: (action) => {
+        const store = useSequencerStore.getState();
+        if (action === 'start') {
+          store.setPanelOpen(true);
+          void store.play();
+        } else {
+          store.stop();
+        }
       },
     });
   };

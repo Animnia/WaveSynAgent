@@ -62,6 +62,12 @@ export interface AnalyzeRequest {
   duration?: number;
 }
 
+export interface SequencerPatternPayload {
+  steps: number;
+  notes: { note: number; start: number; duration: number; velocity: number }[];
+  name?: string;
+}
+
 interface StreamCallbacks {
   onMutation?: (m: Mutation) => void;
   onPlay?: (p: PlayCommand) => void;
@@ -71,6 +77,8 @@ interface StreamCallbacks {
   onRestoreSnapshot?: () => void;
   /** Play + analyze audio, returning features to relay to the agent. */
   onAnalyze?: (req: AnalyzeRequest) => Promise<unknown>;
+  onSequencerPattern?: (p: SequencerPatternPayload) => void;
+  onSequencerControl?: (action: 'start' | 'stop') => void;
 }
 
 interface AgentActions {
@@ -476,6 +484,18 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                   break;
                 case 'restore_snapshot':
                   callbacks?.onRestoreSnapshot?.();
+                  break;
+                case 'sequencer_pattern':
+                  callbacks?.onSequencerPattern?.({
+                    steps: evt.steps === 32 ? 32 : 16,
+                    notes: Array.isArray(evt.notes)
+                      ? (evt.notes as SequencerPatternPayload['notes'])
+                      : [],
+                    name: typeof evt.name === 'string' ? evt.name : undefined,
+                  });
+                  break;
+                case 'sequencer_control':
+                  callbacks?.onSequencerControl?.(evt.action === 'stop' ? 'stop' : 'start');
                   break;
                 case 'analyze_request': {
                   // The agent asked us to be its ears: play notes, analyze,

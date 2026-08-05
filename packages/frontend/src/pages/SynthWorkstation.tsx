@@ -15,6 +15,8 @@ import AgentPanel from '@/components/agent/AgentPanel';
 import { useAgentStore } from '@/stores/agentStore';
 import PresetBrowser from '@/components/presets/PresetBrowser';
 import { usePresetStore } from '@/stores/presetStore';
+import SequencerPanel from '@/components/synth/SequencerPanel';
+import { useSequencerStore } from '@/stores/sequencerStore';
 
 export default function SynthWorkstation() {
   const synthState = useSynthStore((s) => s.state);
@@ -25,6 +27,9 @@ export default function SynthWorkstation() {
   const redo = useSynthStore((s) => s.redo);
   const canUndo = useSynthStore((s) => s.past.length > 0);
   const canRedo = useSynthStore((s) => s.future.length > 0);
+  const sequencerOpen = useSequencerStore((s) => s.panelOpen);
+  const sequencerPlaying = useSequencerStore((s) => s.playing);
+  const toggleSequencer = useSequencerStore((s) => s.togglePanel);
 
   // Sync engine on mount
   useEffect(() => {
@@ -90,6 +95,16 @@ export default function SynthWorkstation() {
             className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             ↪ Redo
+          </button>
+          <button
+            onClick={toggleSequencer}
+            className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+              sequencerOpen
+                ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
+                : 'bg-bg-tertiary text-text-secondary border-border-default hover:border-border-active'
+            }`}
+          >
+            {sequencerPlaying ? '◉ ' : ''}Seq
           </button>
           <button
             onClick={togglePresetBrowser}
@@ -168,7 +183,8 @@ export default function SynthWorkstation() {
         <AgentPanel />
       </div>
 
-      {/* ===== Bottom: Keyboard ===== */}
+      {/* ===== Bottom: Sequencer (collapsible) + Keyboard ===== */}
+      {sequencerOpen && <SequencerPanel />}
       <div className="border-t border-border-default bg-bg-secondary p-2">
         <VirtualKeyboard startOctave={3} octaves={3} />
       </div>

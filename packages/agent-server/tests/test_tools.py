@@ -180,3 +180,70 @@ def test_tool_count_and_unique_names():
     names = [t["function"]["name"] for t in SYNTH_TOOLS]
     assert len(names) == len(set(names))
     assert "set_params" in names and "analyze_audio" in names
+
+
+# ── sequencer tools ──
+
+
+class TestSequencerTools:
+    def test_valid_pattern(self, synth_state):
+        result = execute_tool(
+            "sequence_pattern",
+            {
+                "steps": 16,
+                "notes": [
+                    {"note": 36, "start": 0},
+                    {"note": 36, "start": 4, "duration": 2},
+                    {"note": 43, "start": 8, "velocity": 90},
+                ],
+            },
+            synth_state,
+        )
+        pattern = result["sequencer_pattern"]
+        assert pattern["steps"] == 16
+        assert len(pattern["notes"]) == 3
+        # defaults filled
+        assert pattern["notes"][0]["duration"] == 1
+        assert pattern["notes"][0]["velocity"] == 100
+
+    def test_invalid_notes_skipped(self, synth_state):
+        result = execute_tool(
+            "sequence_pattern",
+            {
+                "steps": 16,
+                "notes": [
+                    {"note": 60, "start": 0},
+                    {"note": 200, "start": 4},    # out of MIDI range
+                    {"note": 60, "start": 99},    # beyond pattern length
+                    "garbage",
+                ],
+            },
+            synth_state,
+        )
+        pattern = result["sequencer_pattern"]
+        assert len(pattern["notes"]) == 1
+        assert "skipped" in result["result"]
+
+    def test_all_invalid_rejected(self, synth_state):
+        result = execute_tool(
+            "sequence_pattern",
+            {"steps": 16, "notes": [{"note": 999, "start": 0}]},
+            synth_state,
+        )
+        assert "sequencer_pattern" not in result
+
+    def test_bad_steps_rejected(self, synth_state):
+        result = execute_tool(
+            "sequence_pattern",
+            {"steps": 24, "notes": [{"note": 60, "start": 0}]},
+            synth_state,
+        )
+        assert "sequencer_pattern" not in result
+
+    def test_sequencer_control(self, synth_state):
+        start = execute_tool("sequencer_control", {"action": "start"}, synth_state)
+        assert start["sequencer_control"] == "start"
+        stop = execute_tool("sequencer_control", {"action": "stop"}, synth_state)
+        assert stop["sequencer_control"] == "stop"
+        bad = execute_tool("sequencer_control", {"action": "explode"}, synth_state)
+        assert "sequencer_control" not in bad

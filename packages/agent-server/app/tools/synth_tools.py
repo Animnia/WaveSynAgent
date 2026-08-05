@@ -12,6 +12,8 @@ from .param_specs import validate_mutations
 
 # ─── Tool definitions in OpenAI function-calling format ───
 
+_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
 SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -35,7 +37,10 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                         "items": {
                             "type": "object",
                             "properties": {
-                                "path": {"type": "string", "description": "Dot path, e.g. 'filter.cutoff'"},
+                                "path": {
+                                    "type": "string",
+                                    "description": "Dot path, e.g. 'filter.cutoff'",
+                                },
                                 "value": {"description": "New value (number | boolean | enum string)"},
                             },
                             "required": ["path", "value"],
@@ -392,6 +397,54 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "sequence_pattern",
+            "description": (
+                "Write a looping step-sequencer pattern (16 or 32 sixteenth-note steps) that "
+                "plays through the CURRENT patch. Replaces the existing pattern. Use it to "
+                "demo a sound in context (basslines, arps, riffs) or to write loops on request. "
+                "Start playback with sequencer_control afterwards."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "steps": {"type": "integer", "enum": [16, 32]},
+                    "notes": {
+                        "type": "array",
+                        "maxItems": 64,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "note": {"type": "integer", "minimum": 21, "maximum": 108},
+                                "start": {"type": "integer", "minimum": 0, "description": "0-based step index"},
+                                "duration": {"type": "integer", "minimum": 1, "maximum": 32, "description": "length in steps (default 1)"},
+                                "velocity": {"type": "integer", "minimum": 1, "maximum": 127, "default": 100},
+                            },
+                            "required": ["note", "start"],
+                        },
+                    },
+                    "name": {"type": "string", "description": "Optional pattern name"},
+                },
+                "required": ["steps", "notes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "sequencer_control",
+            "description": "Start or stop the step sequencer. Start it after writing a pattern so the user hears the loop; stop when asked or before demonstrating one-shot notes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["start", "stop"]},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -572,6 +625,19 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "snapshot": True,
             }
 
+        case "sequence_pattern":
+            return _sequence_pattern(arguments)
+
+        case "sequencer_control":
+            action = arguments.get("action")
+            if action not in ("start", "stop"):
+                return {"result": "sequencer_control requires action='start'|'stop'", "mutations": []}
+            return {
+                "result": f"Sequencer {action}.",
+                "mutations": [],
+                "sequencer_control": action,
+            }
+
         case "restore_snapshot":
             return {
                 "result": "Snapshot restore requested.",
@@ -600,6 +666,48 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
 
         case _:
             return {"result": f"Unknown tool: {tool_name}", "mutations": []}
+
+
+def _sequence_pattern(args: dict) -> dict:
+    """Validate a sequencer pattern from the LLM; invalid notes are skipped."""
+    steps = args.get("steps")
+    if steps not in (16, 32):
+        return {"result": "sequence_pattern requires steps to be 16 or 32", "mutations": []}
+
+    raw_notes = args.get("notes") or []
+    if not isinstance(raw_notes, list):
+        return {"result": "'notes' must be an array", "mutations": []}
+
+    valid: list[dict[str, Any]] = []
+    skipped = 0
+    for item in raw_notes[:64]:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        try:
+            note = int(item["note"])
+            start = int(item["start"])
+            duration = int(item.get("duration", 1))
+            velocity = int(item.get("velocity", 100))
+        except (KeyError, TypeError, ValueError):
+            skipped += 1
+            continue
+        if not (21 <= note <= 108 and 0 <= start < steps and 1 <= duration <= 32 and 1 <= velocity <= 127):
+            skipped += 1
+            continue
+        valid.append({"note": note, "start": start, "duration": duration, "velocity": velocity})
+
+    if not valid:
+        return {"result": "no valid notes in pattern (check note/start ranges)", "mutations": []}
+
+    result = f"Pattern written: {steps} steps, {len(valid)} notes"
+    if skipped:
+        result += f" ({skipped} invalid skipped)"
+    payload: dict[str, Any] = {"steps": steps, "notes": valid}
+    name = args.get("name")
+    if isinstance(name, str) and name.strip():
+        payload["name"] = name.strip()[:40]
+    return {"result": result + ".", "mutations": [], "sequencer_pattern": payload}
 
 
 def _set_params(args: dict) -> dict:
@@ -799,5 +907,19 @@ def _format_state(state: dict) -> str:
 
     m = state.get("master", {})
     lines.append(f"Master: vol={m.get('volume',0):.2f} | bpm={m.get('bpm',120)}")
+
+    seq = state.get("sequencer")
+    if isinstance(seq, dict):
+        playing = "PLAYING" if seq.get("playing") else "stopped"
+        notes = seq.get("notes") or []
+        lines.append(f"Sequencer: {playing} | {seq.get('steps', 16)} steps | {len(notes)} notes")
+        if notes:
+            brief = " ".join(
+                f"{_NOTE_NAMES[n['note'] % 12]}{n['note'] // 12 - 1}@{n['start']}"
+                for n in notes[:16]
+                if isinstance(n, dict) and "note" in n and "start" in n
+            )
+            if brief:
+                lines.append(f"  notes: {brief}{' …' if len(notes) > 16 else ''}")
 
     return "\n".join(lines)

@@ -5,6 +5,8 @@ import type {
   LFOState,
   EffectId,
   ModDestination,
+  SequencerPattern,
+  SequencerNote,
 } from './types';
 import { midiToFrequency, DEFAULT_EFFECT_CHAIN } from './types';
 
@@ -95,6 +97,14 @@ export class AudioEngine {
   // Polyphony
   private voices: Map<number, Voice> = new Map();
   private maxVoices = 16;
+
+  // Step sequencer (Tone.Part on the shared Transport)
+  private seqPart: Tone.Part<[string, SequencerNote]> | null = null;
+  private seqStepEventId: number | null = null;
+  private seqStepCounter = 0;
+  private seqSteps = 16;
+  /** UI hook: called (via Tone.Draw) with the current step while playing. */
+  onStep: ((step: number) => void) | null = null;
 
   // Current state reference
   private state: SynthState | null = null;
@@ -622,7 +632,11 @@ export class AudioEngine {
   }
 
   // ===== Note Triggering (Polyphonic) =====
-  noteOn(midiNote: number, velocity = 100): void {
+  /**
+   * @param when Optional precise audio time (used by the sequencer);
+   *             defaults to "now" for live playing.
+   */
+  noteOn(midiNote: number, velocity = 100, when?: number): void {
     if (!this.state) return;
     // If audio context is not yet unlocked, attempt to start.
     // If the underlying context is already 'running' (e.g. unlocked by a
@@ -639,12 +653,17 @@ export class AudioEngine {
     }
 
     // If a voice already exists for this midi (re-pressed before release
-    // timeout fired), release+dispose it immediately so the new voice
-    // owns the map entry cleanly.
+    // timeout fired, or the sequencer retriggered the same pitch), fade it
+    // out quickly instead of hard-disposing (avoids an audible click).
+    const now = Tone.now();
+    const at = when ?? now;
     const existing = this.voices.get(midiNote);
     if (existing) {
       this.voices.delete(midiNote);
-      this.disposeVoice(existing);
+      try {
+        existing.ampEnvelope.triggerRelease(at);
+      } catch { /* already released */ }
+      setTimeout(() => this.disposeVoice(existing), 300);
     }
 
     // Steal oldest voice if at max
@@ -663,20 +682,20 @@ export class AudioEngine {
           20,
           20000,
         );
-        this.filter.frequency.setTargetAtTime(tracked, Tone.now(), 0.005);
+        this.filter.frequency.setTargetAtTime(tracked, at, 0.005);
       }
       if (f.envelopeAmount !== 0) {
-        this.filterEnv.triggerAttack();
+        this.filterEnv.triggerAttack(at);
       }
     }
 
     const freq = midiToFrequency(midiNote);
     const voice = this.createVoice(freq, velocity / 127);
     this.voices.set(midiNote, voice);
-    voice.ampEnvelope.triggerAttack(Tone.now(), velocity / 127);
+    voice.ampEnvelope.triggerAttack(at, velocity / 127);
   }
 
-  noteOff(midiNote: number): void {
+  noteOff(midiNote: number, when?: number): void {
     const voice = this.voices.get(midiNote);
     if (!voice) return;
 
@@ -687,15 +706,19 @@ export class AudioEngine {
 
     // Release the shared filter envelope only when the last voice lets go.
     if (this.voices.size === 0 && this.state?.filter.enabled) {
-      this.filterEnv.triggerRelease();
+      this.filterEnv.triggerRelease(when);
     }
 
+    const now = Tone.now();
+    const at = when ?? now;
     const releaseTime = this.state?.ampEnvelope.release ?? 0.3;
-    voice.ampEnvelope.triggerRelease();
+    voice.ampEnvelope.triggerRelease(at);
 
+    // Disposal waits for both a future scheduled release and the tail.
+    const disposeInMs = Math.max(0, (at - now) * 1000) + (releaseTime + 0.1) * 1000;
     setTimeout(() => {
       this.disposeVoice(voice);
-    }, (releaseTime + 0.1) * 1000);
+    }, disposeInMs);
   }
 
   private disposeVoice(voice: Voice): void {
@@ -794,6 +817,81 @@ export class AudioEngine {
     return { oscs, pans };
   }
 
+  // ===== Step Sequencer =====
+  /** Convert a step index to Transport time (bars:beats:sixteenths). */
+  private static stepToTransportTime(step: number): string {
+    const bar = Math.floor(step / 16);
+    const rem = step % 16;
+    return `${bar}:${Math.floor(rem / 4)}:${rem % 4}`;
+  }
+
+  /**
+   * (Re)build the looping pattern part. If the sequencer is currently
+   * playing, playback resumes seamlessly with the new pattern.
+   */
+  setSequencerPattern(pattern: SequencerPattern | null): void {
+    const wasPlaying = this.transport.state === 'started';
+    this.teardownSequencerPart();
+    if (!pattern || pattern.notes.length === 0) return;
+
+    this.seqSteps = pattern.steps;
+    const events = pattern.notes.map(
+      (n) => [AudioEngine.stepToTransportTime(n.start), n] as [string, SequencerNote],
+    );
+    this.seqPart = new Tone.Part<[string, SequencerNote]>((time, value) => {
+      const secPerStep = 60 / (this.transport.bpm.value as number) / 4;
+      this.noteOn(value.note, value.velocity, time);
+      this.noteOff(value.note, time + value.duration * secPerStep);
+    }, events);
+    this.seqPart.loop = true;
+    this.seqPart.loopEnd = AudioEngine.stepToTransportTime(pattern.steps);
+
+    if (wasPlaying) {
+      this.seqPart.start(0);
+      this.seqStepCounter = Math.round(
+        Tone.Time(this.transport.position as Tone.Unit.Time).toSeconds() /
+          (60 / (this.transport.bpm.value as number) / 4),
+      );
+    }
+  }
+
+  startSequencer(): void {
+    if (!this.seqPart) return;
+    this.seqStepCounter = 0;
+    if (this.seqStepEventId === null) {
+      this.seqStepEventId = this.transport.scheduleRepeat((time) => {
+        const step = this.seqStepCounter % this.seqSteps;
+        this.seqStepCounter++;
+        Tone.getDraw().schedule(() => this.onStep?.(step), time);
+      }, '16n');
+    }
+    this.transport.start('+0.1');
+    this.seqPart.start('+0.1');
+  }
+
+  stopSequencer(): void {
+    this.seqPart?.stop();
+    if (this.seqStepEventId !== null) {
+      this.transport.clear(this.seqStepEventId);
+      this.seqStepEventId = null;
+    }
+    this.transport.stop();
+    this.transport.position = 0;
+    this.panic();
+  }
+
+  isSequencerPlaying(): boolean {
+    return this.transport.state === 'started';
+  }
+
+  private teardownSequencerPart(): void {
+    if (this.seqPart) {
+      this.seqPart.stop();
+      this.seqPart.dispose();
+      this.seqPart = null;
+    }
+  }
+
   // ===== Analysis =====
   getWaveformData(): Float32Array {
     return this.analyserNode.getValue() as Float32Array;
@@ -805,6 +903,8 @@ export class AudioEngine {
 
   // ===== Cleanup =====
   dispose(): void {
+    this.stopSequencer();
+    this.teardownSequencerPart();
     this.panic();
     for (const index of [1, 2] as const) {
       this.removeLfo(index);
