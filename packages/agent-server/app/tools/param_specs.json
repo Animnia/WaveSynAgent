@@ -1,0 +1,508 @@
+{
+  "$comment": "Single source of truth for every agent/user-controllable synth parameter. Consumed by paramRegistry.ts (frontend, authoritative) and exported to agent-server (app/tools/param_specs.json) via 'pnpm gen:params'. Wildcard '*' matches exactly one path segment (e.g. oscillators.0.volume). Ranges here MUST stay in sync with the tool schemas in synth_tools.py.",
+  "version": 1,
+  "params": [
+    {
+      "path": "oscillators.*.enabled",
+      "type": "boolean",
+      "label": "OSC enabled"
+    },
+    {
+      "path": "oscillators.*.type",
+      "type": "enum",
+      "label": "OSC waveform",
+      "values": [
+        "sine",
+        "triangle",
+        "sawtooth",
+        "square"
+      ]
+    },
+    {
+      "path": "oscillators.*.volume",
+      "type": "number",
+      "label": "OSC volume",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "oscillators.*.semitone",
+      "type": "integer",
+      "label": "OSC semitone",
+      "min": -24,
+      "max": 24
+    },
+    {
+      "path": "oscillators.*.fine",
+      "type": "integer",
+      "label": "OSC fine (cents)",
+      "min": -100,
+      "max": 100
+    },
+    {
+      "path": "oscillators.*.detune",
+      "type": "integer",
+      "label": "OSC detune (cents)",
+      "min": -1200,
+      "max": 1200
+    },
+    {
+      "path": "oscillators.*.pan",
+      "type": "number",
+      "label": "OSC pan",
+      "min": -1,
+      "max": 1
+    },
+    {
+      "path": "oscillators.*.unison",
+      "type": "integer",
+      "label": "OSC unison voices",
+      "min": 1,
+      "max": 8
+    },
+    {
+      "path": "oscillators.*.unisonSpread",
+      "type": "number",
+      "label": "OSC unison spread (cents)",
+      "min": 0,
+      "max": 100
+    },
+    {
+      "path": "filter.enabled",
+      "type": "boolean",
+      "label": "Filter enabled"
+    },
+    {
+      "path": "filter.type",
+      "type": "enum",
+      "label": "Filter type",
+      "values": [
+        "lowpass",
+        "highpass",
+        "bandpass",
+        "notch"
+      ]
+    },
+    {
+      "path": "filter.cutoff",
+      "type": "number",
+      "label": "Filter cutoff (Hz)",
+      "min": 20,
+      "max": 20000
+    },
+    {
+      "path": "filter.resonance",
+      "type": "number",
+      "label": "Filter resonance",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "filter.envelopeAmount",
+      "type": "number",
+      "label": "Filter env amount",
+      "min": -1,
+      "max": 1
+    },
+    {
+      "path": "filter.keyTracking",
+      "type": "number",
+      "label": "Filter key tracking",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "ampEnvelope.attack",
+      "type": "number",
+      "label": "Amp attack (s)",
+      "min": 0.001,
+      "max": 5
+    },
+    {
+      "path": "ampEnvelope.decay",
+      "type": "number",
+      "label": "Amp decay (s)",
+      "min": 0.001,
+      "max": 5
+    },
+    {
+      "path": "ampEnvelope.sustain",
+      "type": "number",
+      "label": "Amp sustain",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "ampEnvelope.release",
+      "type": "number",
+      "label": "Amp release (s)",
+      "min": 0.001,
+      "max": 10
+    },
+    {
+      "path": "filterEnvelope.attack",
+      "type": "number",
+      "label": "Filter env attack (s)",
+      "min": 0.001,
+      "max": 5
+    },
+    {
+      "path": "filterEnvelope.decay",
+      "type": "number",
+      "label": "Filter env decay (s)",
+      "min": 0.001,
+      "max": 5
+    },
+    {
+      "path": "filterEnvelope.sustain",
+      "type": "number",
+      "label": "Filter env sustain",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "filterEnvelope.release",
+      "type": "number",
+      "label": "Filter env release (s)",
+      "min": 0.001,
+      "max": 10
+    },
+    {
+      "path": "lfo1.enabled",
+      "type": "boolean",
+      "label": "LFO1 enabled"
+    },
+    {
+      "path": "lfo1.waveform",
+      "type": "enum",
+      "label": "LFO1 waveform",
+      "values": [
+        "sine",
+        "triangle",
+        "sawtooth",
+        "square"
+      ]
+    },
+    {
+      "path": "lfo1.rate",
+      "type": "number",
+      "label": "LFO1 rate (Hz)",
+      "min": 0.01,
+      "max": 50
+    },
+    {
+      "path": "lfo1.depth",
+      "type": "number",
+      "label": "LFO1 depth",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "lfo1.target",
+      "type": "enum",
+      "label": "LFO1 target",
+      "values": [
+        "filterCutoff",
+        "volume",
+        "pitch",
+        "pan"
+      ]
+    },
+    {
+      "path": "lfo2.enabled",
+      "type": "boolean",
+      "label": "LFO2 enabled"
+    },
+    {
+      "path": "lfo2.waveform",
+      "type": "enum",
+      "label": "LFO2 waveform",
+      "values": [
+        "sine",
+        "triangle",
+        "sawtooth",
+        "square"
+      ]
+    },
+    {
+      "path": "lfo2.rate",
+      "type": "number",
+      "label": "LFO2 rate (Hz)",
+      "min": 0.01,
+      "max": 50
+    },
+    {
+      "path": "lfo2.depth",
+      "type": "number",
+      "label": "LFO2 depth",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "lfo2.target",
+      "type": "enum",
+      "label": "LFO2 target",
+      "values": [
+        "filterCutoff",
+        "volume",
+        "pitch",
+        "pan"
+      ]
+    },
+    {
+      "path": "effects.reverb.enabled",
+      "type": "boolean",
+      "label": "Reverb enabled"
+    },
+    {
+      "path": "effects.reverb.size",
+      "type": "number",
+      "label": "Reverb size",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.reverb.damping",
+      "type": "number",
+      "label": "Reverb damping",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.reverb.mix",
+      "type": "number",
+      "label": "Reverb mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.delay.enabled",
+      "type": "boolean",
+      "label": "Delay enabled"
+    },
+    {
+      "path": "effects.delay.time",
+      "type": "number",
+      "label": "Delay time (s)",
+      "min": 0.01,
+      "max": 2
+    },
+    {
+      "path": "effects.delay.feedback",
+      "type": "number",
+      "label": "Delay feedback",
+      "min": 0,
+      "max": 0.95
+    },
+    {
+      "path": "effects.delay.mix",
+      "type": "number",
+      "label": "Delay mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.chorus.enabled",
+      "type": "boolean",
+      "label": "Chorus enabled"
+    },
+    {
+      "path": "effects.chorus.rate",
+      "type": "number",
+      "label": "Chorus rate (Hz)",
+      "min": 0.1,
+      "max": 10
+    },
+    {
+      "path": "effects.chorus.depth",
+      "type": "number",
+      "label": "Chorus depth",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.chorus.mix",
+      "type": "number",
+      "label": "Chorus mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.distortion.enabled",
+      "type": "boolean",
+      "label": "Distortion enabled"
+    },
+    {
+      "path": "effects.distortion.drive",
+      "type": "number",
+      "label": "Distortion drive",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.distortion.mix",
+      "type": "number",
+      "label": "Distortion mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.compressor.enabled",
+      "type": "boolean",
+      "label": "Compressor enabled"
+    },
+    {
+      "path": "effects.compressor.threshold",
+      "type": "number",
+      "label": "Compressor threshold (dB)",
+      "min": -60,
+      "max": 0
+    },
+    {
+      "path": "effects.compressor.ratio",
+      "type": "number",
+      "label": "Compressor ratio",
+      "min": 1,
+      "max": 20
+    },
+    {
+      "path": "effects.compressor.attack",
+      "type": "number",
+      "label": "Compressor attack (s)",
+      "min": 0.001,
+      "max": 1
+    },
+    {
+      "path": "effects.compressor.release",
+      "type": "number",
+      "label": "Compressor release (s)",
+      "min": 0.01,
+      "max": 1
+    },
+    {
+      "path": "effects.eq3.enabled",
+      "type": "boolean",
+      "label": "EQ3 enabled"
+    },
+    {
+      "path": "effects.eq3.low",
+      "type": "number",
+      "label": "EQ3 low (dB)",
+      "min": -24,
+      "max": 24
+    },
+    {
+      "path": "effects.eq3.mid",
+      "type": "number",
+      "label": "EQ3 mid (dB)",
+      "min": -24,
+      "max": 24
+    },
+    {
+      "path": "effects.eq3.high",
+      "type": "number",
+      "label": "EQ3 high (dB)",
+      "min": -24,
+      "max": 24
+    },
+    {
+      "path": "effects.eq3.lowFrequency",
+      "type": "number",
+      "label": "EQ3 low crossover (Hz)",
+      "min": 50,
+      "max": 1000
+    },
+    {
+      "path": "effects.eq3.highFrequency",
+      "type": "number",
+      "label": "EQ3 high crossover (Hz)",
+      "min": 1000,
+      "max": 10000
+    },
+    {
+      "path": "effects.phaser.enabled",
+      "type": "boolean",
+      "label": "Phaser enabled"
+    },
+    {
+      "path": "effects.phaser.rate",
+      "type": "number",
+      "label": "Phaser rate (Hz)",
+      "min": 0.1,
+      "max": 10
+    },
+    {
+      "path": "effects.phaser.depth",
+      "type": "number",
+      "label": "Phaser depth",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.phaser.baseFrequency",
+      "type": "number",
+      "label": "Phaser base freq (Hz)",
+      "min": 20,
+      "max": 2000
+    },
+    {
+      "path": "effects.phaser.octaves",
+      "type": "integer",
+      "label": "Phaser octaves",
+      "min": 1,
+      "max": 7
+    },
+    {
+      "path": "effects.phaser.mix",
+      "type": "number",
+      "label": "Phaser mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.bitCrusher.enabled",
+      "type": "boolean",
+      "label": "BitCrusher enabled"
+    },
+    {
+      "path": "effects.bitCrusher.bits",
+      "type": "integer",
+      "label": "BitCrusher bits",
+      "min": 1,
+      "max": 16
+    },
+    {
+      "path": "effects.bitCrusher.mix",
+      "type": "number",
+      "label": "BitCrusher mix",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "effects.stereoWidener.enabled",
+      "type": "boolean",
+      "label": "StereoWidener enabled"
+    },
+    {
+      "path": "effects.stereoWidener.width",
+      "type": "number",
+      "label": "StereoWidener width",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "master.volume",
+      "type": "number",
+      "label": "Master volume",
+      "min": 0,
+      "max": 1
+    },
+    {
+      "path": "master.bpm",
+      "type": "integer",
+      "label": "BPM",
+      "min": 40,
+      "max": 300
+    }
+  ]
+}

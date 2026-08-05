@@ -34,17 +34,7 @@ export default function AgentPanel() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   const synthState = useSynthStore((s) => s.state);
-  const updateOscillator = useSynthStore((s) => s.updateOscillator);
-  const updateFilter = useSynthStore((s) => s.updateFilter);
-  const updateAmpEnvelope = useSynthStore((s) => s.updateAmpEnvelope);
-  const updateFilterEnvelope = useSynthStore((s) => s.updateFilterEnvelope);
-  const updateLFO = useSynthStore((s) => s.updateLFO);
-  const updateEffects = useSynthStore((s) => s.updateEffects);
-  const updateMaster = useSynthStore((s) => s.updateMaster);
-  const reorderEffectChain = useSynthStore((s) => s.reorderEffectChain);
-  const addModRoute = useSynthStore((s) => s.addModRoute);
-  const updateModRoute = useSynthStore((s) => s.updateModRoute);
-  const removeModRoute = useSynthStore((s) => s.removeModRoute);
+  const applyMutationToStore = useSynthStore((s) => s.applyMutation);
   const noteOn = useSynthStore((s) => s.noteOn);
   const noteOff = useSynthStore((s) => s.noteOff);
 
@@ -63,37 +53,10 @@ export default function AgentPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Registry-driven dispatch: validates + applies any param path, plus the
+  // special effectChain / modulation.* paths — all inside the synth store.
   const applyMutation = (mut: Mutation) => {
-    const parts = mut.path.split('.');
-    try {
-      if (parts[0] === 'oscillators' && parts.length >= 3) {
-        updateOscillator(parseInt(parts[1]), { [parts[2]]: mut.value });
-      } else if (parts[0] === 'filter') {
-        updateFilter({ [parts[1]]: mut.value });
-      } else if (parts[0] === 'ampEnvelope') {
-        updateAmpEnvelope({ [parts[1]]: mut.value });
-      } else if (parts[0] === 'filterEnvelope') {
-        updateFilterEnvelope({ [parts[1]]: mut.value });
-      } else if (parts[0] === 'lfo1' || parts[0] === 'lfo2') {
-        updateLFO(parts[0] === 'lfo1' ? 1 : 2, { [parts[1]]: mut.value });
-      } else if (parts[0] === 'effects' && parts.length >= 3) {
-        updateEffects({ [parts[1]]: { [parts[2]]: mut.value } } as any);
-      } else if (parts[0] === 'master') {
-        updateMaster({ [parts[1]]: mut.value });
-      } else if (parts[0] === 'effectChain') {
-        reorderEffectChain(mut.value as any);
-      } else if (parts[0] === 'modulation') {
-        if (parts[1] === 'add') {
-          addModRoute(mut.value as any);
-        } else if (parts[1] === 'remove') {
-          removeModRoute(mut.value as string);
-        } else if (parts[1] === 'update' && parts[2]) {
-          updateModRoute(parts[2], mut.value as any);
-        }
-      }
-    } catch (e) {
-      console.warn('applyMutation failed:', mut, e);
-    }
+    applyMutationToStore(mut.path, mut.value);
   };
 
   const handlePlay = async (cmd: PlayCommand) => {

@@ -3,6 +3,7 @@ import { immer } from 'zustand/middleware/immer';
 import type { SynthState, OscillatorState, FilterState, EnvelopeState, LFOState, EffectsState, MasterState, EffectId, ModRoute } from '@/engine/types';
 import { createDefaultSynthState } from '@/engine/defaults';
 import { getAudioEngine } from '@/engine/AudioEngine';
+import { validateMutation, setByPath } from '@/engine/paramRegistry';
 
 interface SynthStore {
   state: SynthState;
@@ -11,6 +12,16 @@ interface SynthStore {
 
   // Actions
   setSynthState: (state: SynthState) => void;
+  /**
+   * Generic registry-driven mutation entry point (used by the AI agent and
+   * any path-based caller). Validates against paramSpecs; special paths:
+   *   effectChain                 → reorderEffectChain(value: EffectId[])
+   *   modulation.add              → addModRoute(value)
+   *   modulation.remove           → removeModRoute(value: id)
+   *   modulation.update.<id>      → updateModRoute(id, value)
+   * Returns true when the mutation was applied.
+   */
+  applyMutation: (path: string, value: unknown) => boolean;
   updateOscillator: (index: number, partial: Partial<OscillatorState>) => void;
   updateFilter: (partial: Partial<FilterState>) => void;
   updateAmpEnvelope: (partial: Partial<EnvelopeState>) => void;
@@ -44,6 +55,48 @@ export const useSynthStore = create<SynthStore>()(
           draft.state = newState;
         });
         syncEngine();
+      },
+
+      applyMutation: (path, value) => {
+        const parts = path.split('.');
+
+        // ── Special (non-registry) paths ──
+        if (parts[0] === 'effectChain') {
+          if (!Array.isArray(value)) {
+            console.warn('applyMutation: effectChain expects an array, got', value);
+            return false;
+          }
+          get().reorderEffectChain(value as EffectId[]);
+          return true;
+        }
+        if (parts[0] === 'modulation') {
+          if (parts[1] === 'add') {
+            get().addModRoute(value as Partial<ModRoute>);
+            return true;
+          }
+          if (parts[1] === 'remove' && typeof value === 'string') {
+            get().removeModRoute(value);
+            return true;
+          }
+          if (parts[1] === 'update' && parts[2] && value && typeof value === 'object') {
+            get().updateModRoute(parts[2], value as Partial<ModRoute>);
+            return true;
+          }
+          console.warn('applyMutation: malformed modulation mutation', path, value);
+          return false;
+        }
+
+        // ── Registry-validated parameter paths ──
+        const result = validateMutation(path, value);
+        if (!result.ok) {
+          console.warn(`applyMutation rejected: ${result.error}`);
+          return false;
+        }
+        set((draft) => {
+          setByPath(draft.state, path, result.value);
+        });
+        syncEngine();
+        return true;
       },
 
       updateOscillator: (index, partial) => {

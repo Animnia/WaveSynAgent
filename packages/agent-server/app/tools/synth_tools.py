@@ -8,9 +8,46 @@ from __future__ import annotations
 
 from typing import Any
 
+from .param_specs import validate_mutations
+
 # ─── Tool definitions in OpenAI function-calling format ───
 
 SYNTH_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "set_params",
+            "description": (
+                "Batch-set synth parameters by dot path (PREFERRED for multi-parameter "
+                "changes — one call instead of many). Paths follow the synth state shape, "
+                "e.g. 'oscillators.0.volume', 'filter.cutoff', 'ampEnvelope.attack', "
+                "'lfo1.rate', 'effects.reverb.mix', 'master.bpm'. Oscillator index is 0-2. "
+                "Invalid entries are rejected with per-parameter error messages; valid ones "
+                "are still applied."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "params": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 40,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Dot path, e.g. 'filter.cutoff'"},
+                                "value": {"description": "New value (number | boolean | enum string)"},
+                            },
+                            "required": ["path", "value"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["params"],
+                "additionalProperties": False,
+            },
+        },
+    },
     {
         "type": "function",
         "function": {
@@ -340,23 +377,26 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
         case "read_synth_state":
             return {"result": _format_state(synth_state), "mutations": []}
 
+        case "set_params":
+            return _set_params(arguments)
+
         case "set_oscillator":
-            return _set_oscillator(arguments, synth_state)
+            return _finalize(_set_oscillator(arguments, synth_state))
 
         case "set_filter":
-            return _set_filter(arguments, synth_state)
+            return _finalize(_set_filter(arguments, synth_state))
 
         case "set_envelope":
-            return _set_envelope(arguments, synth_state)
+            return _finalize(_set_envelope(arguments, synth_state))
 
         case "set_lfo":
-            return _set_lfo(arguments, synth_state)
+            return _finalize(_set_lfo(arguments, synth_state))
 
         case "set_effects":
-            return _set_effects(arguments, synth_state)
+            return _finalize(_set_effects(arguments, synth_state))
 
         case "set_master":
-            return _set_master(arguments, synth_state)
+            return _finalize(_set_master(arguments, synth_state))
 
         case "set_mod_route":
             return _set_mod_route(arguments, synth_state)
@@ -400,6 +440,43 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
 
         case _:
             return {"result": f"Unknown tool: {tool_name}", "mutations": []}
+
+
+def _set_params(args: dict) -> dict:
+    """Batch parameter set — validate every entry against the spec registry."""
+    entries = args.get("params") or []
+    if not isinstance(entries, list) or not entries:
+        return {"result": "set_params requires a non-empty 'params' array", "mutations": []}
+
+    raw: list[dict[str, Any]] = []
+    shape_errors: list[str] = []
+    for i, e in enumerate(entries):
+        if not isinstance(e, dict) or "path" not in e or "value" not in e:
+            shape_errors.append(f"params[{i}] must be an object with 'path' and 'value'")
+            continue
+        raw.append({"path": str(e["path"]), "value": e["value"]})
+
+    valid, errors = validate_mutations(raw)
+    errors = shape_errors + errors
+
+    summary = f"Applied {len(valid)} parameter(s)."
+    if errors:
+        summary += " Rejected: " + "; ".join(errors)
+    return {"result": summary, "mutations": valid}
+
+
+def _finalize(result: dict) -> dict:
+    """Post-validate granular-tool mutations against the spec registry.
+
+    The tool schemas already constrain arguments, but the executors pass keys
+    through verbatim — this is the safety net that guarantees only known,
+    in-range parameter paths ever reach the frontend.
+    """
+    valid, errors = validate_mutations(result.get("mutations", []))
+    result["mutations"] = valid
+    if errors:
+        result["result"] += " | Rejected: " + "; ".join(errors)
+    return result
 
 
 def _set_oscillator(args: dict, state: dict) -> dict:

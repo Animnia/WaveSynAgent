@@ -8,6 +8,7 @@
     "build": "vite build",
     "build:typecheck": "tsc -b && vite build",
     "lint": "eslint .",
+    "gen:params": "node scripts/exportParamSpecs.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
