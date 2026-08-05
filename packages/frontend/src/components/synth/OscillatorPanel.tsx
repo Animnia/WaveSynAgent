@@ -1,6 +1,6 @@
 import { useSynthStore } from '@/stores/synthStore';
 import Knob from './Knob';
-import type { BasicWaveform, WaveformType } from '@/engine/types';
+import type { WaveformType } from '@/engine/types';
 
 const WAVEFORMS: { type: WaveformType; label: string; icon: string }[] = [
   { type: 'sine', label: 'Sine', icon: '∿' },

@@ -2,13 +2,9 @@ import * as Tone from 'tone';
 import type {
   SynthState,
   OscillatorState,
-  BasicWaveform,
-  FilterType,
   LFOState,
   LFOTarget,
-  EnvelopeState,
   EffectId,
-  ModRoute,
   ModDestination,
 } from './types';
 import { midiToFrequency, DEFAULT_EFFECT_CHAIN } from './types';
@@ -34,7 +30,6 @@ interface Voice {
  * Manages oscillators, filter, envelopes, LFOs, and effects.
  */
 export class AudioEngine {
-  private context: Tone.BaseContext;
   private masterGain: Tone.Gain;
   private analyserNode: Tone.Waveform;
   private fftAnalyser: Tone.FFT;
@@ -76,8 +71,6 @@ export class AudioEngine {
   private started = false;
 
   constructor() {
-    this.context = Tone.getContext();
-
     // Master output chain: filter → effects → masterGain → analysers → destination
     this.masterGain = new Tone.Gain(0.75);
     this.analyserNode = new Tone.Waveform(2048);
@@ -108,7 +101,10 @@ export class AudioEngine {
       baseFrequency: 350,
       wet: 0,
     });
-    this.bitCrusher = new Tone.BitCrusher({ bits: 8, wet: 0 });
+    // BitCrusher's constructor options type omits `wet` (worklet options),
+    // but the Effect base class provides it at runtime.
+    this.bitCrusher = new Tone.BitCrusher(8);
+    this.bitCrusher.wet.value = 0;
     this.stereoWidener = new Tone.StereoWidener({ width: 0 });
 
     this.effectNodes = new Map<EffectId, Tone.ToneAudioNode>([
@@ -317,7 +313,7 @@ export class AudioEngine {
 
   private getLFOTarget(
     target: LFOTarget,
-  ): { param: Tone.Param | Tone.Signal; min: number; max: number } | null {
+  ): { param: Tone.Param<any> | Tone.Signal<any>; min: number; max: number } | null {
     if (!this.state) return null;
     switch (target) {
       case 'filterCutoff': {
@@ -526,12 +522,11 @@ export class AudioEngine {
     const type = oscState.type === 'custom' ? 'sawtooth' : oscState.type;
 
     if (oscState.unison <= 1) {
-      const osc = new Tone.Oscillator({
-        frequency: freq,
-        type: type as Tone.ToneOscillatorType,
-        volume: Tone.gainToDb(oscState.volume),
-        detune: oscState.detune,
-      });
+      // 2-arg constructor: the options-object overload uses a discriminated
+      // union on `type` that plain ToneOscillatorType doesn't satisfy.
+      const osc = new Tone.Oscillator(freq, type as Tone.ToneOscillatorType);
+      osc.volume.value = Tone.gainToDb(oscState.volume);
+      osc.detune.value = oscState.detune;
       return [osc];
     }
 
@@ -542,12 +537,9 @@ export class AudioEngine {
 
     for (let i = 0; i < count; i++) {
       const detuneOffset = (i - (count - 1) / 2) * spreadPerVoice;
-      const osc = new Tone.Oscillator({
-        frequency: freq,
-        type: type as Tone.ToneOscillatorType,
-        volume: Tone.gainToDb(oscState.volume / Math.sqrt(count)),
-        detune: oscState.detune + detuneOffset,
-      });
+      const osc = new Tone.Oscillator(freq, type as Tone.ToneOscillatorType);
+      osc.volume.value = Tone.gainToDb(oscState.volume / Math.sqrt(count));
+      osc.detune.value = oscState.detune + detuneOffset;
       voices.push(osc);
     }
     return voices;

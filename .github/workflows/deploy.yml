@@ -46,9 +46,9 @@ jobs:
         working-directory: packages/frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend
+      - name: Build frontend (with typecheck)
         working-directory: packages/frontend
-        run: pnpm run build
+        run: pnpm run build:typecheck
 
       - name: Setup SSH
         env:
