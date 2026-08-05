@@ -17,6 +17,7 @@ import PresetBrowser from '@/components/presets/PresetBrowser';
 import { usePresetStore } from '@/stores/presetStore';
 import SequencerPanel from '@/components/synth/SequencerPanel';
 import { useSequencerStore } from '@/stores/sequencerStore';
+import { useMidiStore } from '@/stores/midiStore';
 import { exportCurrentPatch } from '@/utils/export';
 
 export default function SynthWorkstation() {
@@ -31,7 +32,17 @@ export default function SynthWorkstation() {
   const sequencerOpen = useSequencerStore((s) => s.panelOpen);
   const sequencerPlaying = useSequencerStore((s) => s.playing);
   const toggleSequencer = useSequencerStore((s) => s.togglePanel);
+  const midiSupported = useMidiStore((s) => s.supported);
+  const midiEnabled = useMidiStore((s) => s.enabled);
+  const midiInputs = useMidiStore((s) => s.inputs);
+  const midiInit = useMidiStore((s) => s.init);
+  const setMidiEnabled = useMidiStore((s) => s.setEnabled);
   const [exporting, setExporting] = useState(false);
+
+  // Auto-init MIDI on first mount (no-op when unsupported).
+  useEffect(() => {
+    if (midiSupported) void midiInit();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleExport = async () => {
     setExporting(true);
@@ -109,6 +120,23 @@ export default function SynthWorkstation() {
           >
             ↪ Redo
           </button>
+          {midiSupported && (
+            <button
+              onClick={() => setMidiEnabled(!midiEnabled)}
+              title={
+                midiInputs.length > 0
+                  ? `MIDI 输入: ${midiInputs.map((i) => i.name).join(', ')}`
+                  : 'MIDI 已启用，未检测到设备'
+              }
+              className={`px-3 py-1.5 text-xs rounded border transition-colors ${
+                midiEnabled && midiInputs.length > 0
+                  ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
+                  : 'bg-bg-tertiary text-text-secondary border-border-default hover:border-border-active'
+              }`}
+            >
+              MIDI{midiInputs.length > 0 ? `:${midiInputs.length}` : ''}
+            </button>
+          )}
           <button
             onClick={() => void handleExport()}
             disabled={exporting}

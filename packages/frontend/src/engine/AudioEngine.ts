@@ -147,6 +147,27 @@ export class AudioEngine {
 
   private started = false;
   /**
+   * Sustain pedal: note-offs are deferred (voices keep ringing) until the
+   * pedal lifts, then all deferred notes release at once. Sequencer-scheduled
+   * offs (with `when`) bypass the pedal — the pedal is for live playing.
+   */
+  private sustainHeld = false;
+  private sustainedNotes = new Set<number>();
+
+  /** Hold/release the sustain pedal (MIDI CC64 semantics). */
+  setSustain(held: boolean): void {
+    this.sustainHeld = held;
+    if (!held) {
+      const pending = Array.from(this.sustainedNotes);
+      this.sustainedNotes.clear();
+      for (const n of pending) this.noteOff(n);
+    }
+  }
+
+  isSustainHeld(): boolean {
+    return this.sustainHeld;
+  }
+  /**
    * Offline-render mode: no wall-clock voice disposal (OfflineAudioContext
    * renders faster than real time, so setTimeout-based cleanup would fire
    * mid-render and cut release tails). The whole context is discarded after
@@ -741,6 +762,8 @@ export class AudioEngine {
     const existing = this.voices.get(midiNote);
     if (existing) {
       this.voices.delete(midiNote);
+      // A retriggered note is no longer pedal-deferred.
+      this.sustainedNotes.delete(midiNote);
       try {
         existing.ampEnvelope.triggerRelease(at);
       } catch { /* already released */ }
@@ -781,6 +804,12 @@ export class AudioEngine {
   noteOff(midiNote: number, when?: number): void {
     const voice = this.voices.get(midiNote);
     if (!voice) return;
+
+    // Sustain pedal held: defer the release (live playing only).
+    if (this.sustainHeld && when === undefined) {
+      this.sustainedNotes.add(midiNote);
+      return;
+    }
 
     // Remove from map immediately so noteOn can claim the slot for a
     // new press without waiting for release; the closure below disposes
@@ -825,6 +854,8 @@ export class AudioEngine {
 
   /** Stop all notes immediately */
   panic(): void {
+    this.sustainHeld = false; // panic overrides the pedal
+    this.sustainedNotes.clear();
     for (const midiNote of Array.from(this.voices.keys())) {
       this.noteOff(midiNote);
     }
