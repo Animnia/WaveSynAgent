@@ -1,0 +1,12 @@
+{
+  "name": "agent-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WaveSynAgent AI Agent Server (Python/FastAPI — scripts shell out to uv)",
+  "scripts": {
+    "dev": "uv run python -m app.main",
+    "start": "uv run uvicorn app.main:app",
+    "test": "uv run pytest",
+    "lint": "uv run ruff check app tests"
+  }
+}

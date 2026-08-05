@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  packages/agent-server: {}
+
   packages/api-server:
     dependencies:
       '@fastify/cors':

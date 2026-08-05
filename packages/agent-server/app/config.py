@@ -1,6 +1,17 @@
 """Configuration for the agent server."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Resolve .env paths relative to this file (CWD-independent).
+#   repo-root/.env       -> local development (per README quickstart)
+#   agent-server/.env    -> production (written by CI deploy)
+# Later entries take precedence in pydantic-settings, so the production
+# file wins when both exist. Real environment variables always beat both.
+_AGENT_SERVER_DIR = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+ENV_FILES = (_REPO_ROOT / ".env", _AGENT_SERVER_DIR / ".env")
 
 
 class Settings(BaseSettings):
@@ -30,13 +41,13 @@ class Settings(BaseSettings):
     dashscope_model: str = "qwen-max"
 
     # Default provider
-    default_provider: str = "openai"
+    default_provider: str = "deepseek"
 
     # Agent limits
     max_tool_calls_per_turn: int = 10
     max_turns: int = 20
 
-    model_config = {"env_file": "../../.env", "extra": "ignore"}
+    model_config = {"env_file": ENV_FILES, "extra": "ignore"}
 
 
 settings = Settings()

@@ -129,7 +129,9 @@ export const useAgentStore = create<AgentState & AgentActions>()(
       sessionOrder: initialBootstrap.sessionOrder,
       activeSessionId: initialBootstrap.activeSessionId,
       isLoading: false,
-      provider: 'deepseek',
+      // Empty until fetchProviders() resolves; the server default wins so
+      // frontend/backend never disagree about which LLM to use.
+      provider: '',
       availableProviders: [],
       panelOpen: false,
       historyDrawerOpen: false,
@@ -208,7 +210,14 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             const data = await res.json();
             set((s) => {
               s.availableProviders = data.providers;
-              if (data.default && !get().provider) s.provider = data.default;
+              // Adopt the server default when unset, or when the persisted
+              // provider no longer exists server-side (stale localStorage).
+              const stillValid = data.providers.some(
+                (p: { id: string }) => p.id === s.provider,
+              );
+              if (!stillValid) {
+                s.provider = data.default ?? data.providers[0]?.id ?? '';
+              }
             });
           }
         } catch {
@@ -296,14 +305,15 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             resolve();
           };
 
-          ws.onopen = () => {
+            ws.onopen = () => {
             ws.send(
               JSON.stringify({
                 type: 'chat',
                 message,
                 history,
                 synthState,
-                provider: get().provider,
+                // Omit provider when unset — the backend default applies.
+                ...(get().provider ? { provider: get().provider } : {}),
               }),
             );
           };

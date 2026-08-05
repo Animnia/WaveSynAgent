@@ -73,10 +73,10 @@ pnpm dev              # 并行启动全部
 # 或按需单独启动：
 pnpm dev:frontend     # 前端      → http://localhost:5173
 pnpm dev:api          # API 服务  → http://localhost:3001
-pnpm dev:agent        # Agent 服务 → http://localhost:8000
+pnpm dev:agent        # Agent 服务 → http://localhost:3002
 ```
 
-> 最小体验只需 **frontend + agent-server**：打开页面演奏合成器，右下角打开 Agent 面板即可对话调音。api-server（账号/云端预设）为可选。
+> 最小体验只需 **frontend + agent-server**：打开页面演奏合成器，右下角打开 Agent 面板即可对话调音。api-server（账号/云端预设）为可选；首次运行前先 `pnpm --filter api-server db:generate` 生成 Prisma 客户端。
 
 ## 部署
 
