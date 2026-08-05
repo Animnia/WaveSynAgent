@@ -9,6 +9,7 @@
     "build:typecheck": "tsc -b && vite build",
     "lint": "eslint .",
     "gen:params": "node scripts/exportParamSpecs.mjs",
+    "test": "vitest run",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "tailwindcss": "^4.2.2",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.0",
-    "vite": "^8.0.4"
+    "vite": "^8.0.4",
+    "vitest": "^4.1.10"
   }
 }
