@@ -82,13 +82,17 @@ export interface LFOState {
 }
 
 // ===== Modulation Matrix =====
-export type ModSource = 'lfo1' | 'lfo2';
+export type ModSource = 'lfo1' | 'lfo2' | 'modwheel';
 export type ModDestination =
   | 'filter.cutoff'
   | 'filter.resonance'
   | 'master.volume'
   | 'effects.reverb.mix'
-  | 'effects.delay.feedback';
+  | 'effects.delay.feedback'
+  | 'effects.phaser.rate'
+  | 'effects.chorus.rate'
+  | 'voices.pitch'
+  | 'voices.pan';
 
 export interface ModRoute {
   id: string;

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import { getAudioEngine } from '@/engine/AudioEngine';
-import { isMidiSupported, parseMidiMessage, CC_SUSTAIN } from '@/engine/midi';
+import { isMidiSupported, parseMidiMessage, CC_SUSTAIN, CC_MODWHEEL } from '@/engine/midi';
 import { useSynthStore } from './synthStore';
 
 export interface MidiInputInfo {
@@ -15,12 +15,15 @@ interface MidiState {
   enabled: boolean;
   inputs: MidiInputInfo[];
   error: string | null;
+  /** Mod wheel position 0..1 (MIDI CC1 or the ModMatrix slider). */
+  modWheel: number;
 }
 
 interface MidiActions {
   /** Request access and attach listeners. Safe to call repeatedly. */
   init: () => Promise<void>;
   setEnabled: (enabled: boolean) => void;
+  setModWheel: (value: number) => void;
 }
 
 let access: MIDIAccess | null = null;
@@ -39,6 +42,8 @@ function handleMessage(data: Uint8Array): void {
     case 'cc':
       if (evt.controller === CC_SUSTAIN) {
         getAudioEngine().setSustain(evt.value >= 64);
+      } else if (evt.controller === CC_MODWHEEL) {
+        useMidiStore.getState().setModWheel(evt.value / 127);
       }
       break;
     default:
@@ -70,6 +75,7 @@ export const useMidiStore = create<MidiState & MidiActions>()(
     enabled: false,
     inputs: [],
     error: null,
+    modWheel: 0,
 
     init: async () => {
       if (!isMidiSupported()) {
@@ -98,6 +104,12 @@ export const useMidiStore = create<MidiState & MidiActions>()(
       } else {
         detachAll();
       }
+    },
+
+    setModWheel: (value) => {
+      const v = Math.min(1, Math.max(0, value));
+      set((s) => { s.modWheel = v; });
+      getAudioEngine().setModWheel(v);
     },
   })),
 );

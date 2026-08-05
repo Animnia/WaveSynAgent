@@ -57,8 +57,8 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
   - operation="add" 新增路由 (source/destination/depth/enabled)
   - operation="update" 更新已有路由 (需 id)
   - operation="remove" 删除路由 (需 id)
-- source: lfo1 | lfo2
-- destination: filter.cutoff | filter.resonance | master.volume | effects.reverb.mix | effects.delay.feedback
+- source: lfo1 | lfo2 | modwheel（演奏轮，DC 偏移型源，偏移量=轮位置×depth）
+- destination: filter.cutoff | filter.resonance | master.volume | effects.reverb.mix | effects.delay.feedback | effects.phaser.rate | effects.chorus.rate | voices.pitch(±100 cents) | voices.pan
 - depth 是 **双极** 的 (-1..1)，正负决定调制方向
 
 ## 效果链

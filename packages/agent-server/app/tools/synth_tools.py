@@ -299,7 +299,7 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "operation": {"type": "string", "enum": ["add", "update", "remove"]},
                     "id": {"type": "string", "description": "Route id. Required for update/remove. For add, omit (the frontend will generate one)."},
-                    "source": {"type": "string", "enum": ["lfo1", "lfo2"], "description": "Modulation source."},
+                    "source": {"type": "string", "enum": ["lfo1", "lfo2", "modwheel"], "description": "Modulation source. modwheel = performance wheel (CC1), a DC offset scaled by wheel position."},
                     "destination": {
                         "type": "string",
                         "enum": [
@@ -307,7 +307,11 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                             "filter.resonance",
                             "master.volume",
                             "effects.reverb.mix",
-                            "effects.delay.feedback"
+                            "effects.delay.feedback",
+                            "effects.phaser.rate",
+                            "effects.chorus.rate",
+                            "voices.pitch",
+                            "voices.pan"
                         ],
                     },
                     "depth": {"type": "number", "minimum": -1, "maximum": 1, "description": "Bipolar modulation depth."},

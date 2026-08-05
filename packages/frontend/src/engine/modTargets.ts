@@ -1,4 +1,4 @@
-import type { ModDestination } from './types';
+import type { ModDestination, ModSource } from './types';
 
 /**
  * Metadata for each modulation destination — for UI display and engine lookup.
@@ -21,9 +21,14 @@ export const MOD_TARGETS: ModTargetSpec[] = [
   { id: 'master.volume',         label: 'Master Volume',  min: 0,     max: 1 },
   { id: 'effects.reverb.mix',    label: 'Reverb Mix',     min: 0,     max: 1 },
   { id: 'effects.delay.feedback',label: 'Delay Feedback', min: 0,     max: 0.95 },
+  { id: 'effects.phaser.rate',   label: 'Phaser Rate',    min: 0.1,   max: 10 },
+  { id: 'effects.chorus.rate',   label: 'Chorus Rate',    min: 0.1,   max: 10 },
+  { id: 'voices.pitch',          label: 'Pitch (voices)', min: -100,  max: 100 },
+  { id: 'voices.pan',            label: 'Pan (voices)',   min: -1,    max: 1 },
 ];
 
-export const MOD_SOURCES: { id: 'lfo1' | 'lfo2'; label: string }[] = [
+export const MOD_SOURCES: { id: ModSource; label: string }[] = [
   { id: 'lfo1', label: 'LFO 1' },
   { id: 'lfo2', label: 'LFO 2' },
+  { id: 'modwheel', label: 'Mod Wheel' },
 ];

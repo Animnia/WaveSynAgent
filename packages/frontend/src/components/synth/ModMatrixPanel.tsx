@@ -1,4 +1,5 @@
 import { useSynthStore } from '@/stores/synthStore';
+import { useMidiStore } from '@/stores/midiStore';
 import { MOD_SOURCES, MOD_TARGETS } from '@/engine/modTargets';
 import type { ModDestination, ModSource } from '@/engine/types';
 
@@ -7,6 +8,8 @@ export default function ModMatrixPanel() {
   const addRoute = useSynthStore((s) => s.addModRoute);
   const updateRoute = useSynthStore((s) => s.updateModRoute);
   const removeRoute = useSynthStore((s) => s.removeModRoute);
+  const modWheel = useMidiStore((s) => s.modWheel);
+  const setModWheel = useMidiStore((s) => s.setModWheel);
 
   return (
     <div className="bg-bg-panel border border-border-default rounded-lg p-3">
@@ -14,12 +17,28 @@ export default function ModMatrixPanel() {
         <h3 className="text-xs font-medium text-text-secondary uppercase tracking-wide">
           Mod Matrix
         </h3>
-        <button
-          onClick={() => addRoute()}
-          className="text-[10px] px-2 py-1 rounded border border-border-default hover:bg-bg-secondary text-text-secondary"
-        >
-          + ADD
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[10px] text-text-muted">
+            WHEEL
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={modWheel}
+              onChange={(e) => setModWheel(parseFloat(e.target.value))}
+              className="w-16"
+              title="Mod wheel (MIDI CC1)"
+            />
+            <span className="w-7 text-right tabular-nums">{modWheel.toFixed(2)}</span>
+          </label>
+          <button
+            onClick={() => addRoute()}
+            className="text-[10px] px-2 py-1 rounded border border-border-default hover:bg-bg-secondary text-text-secondary"
+          >
+            + ADD
+          </button>
+        </div>
       </div>
 
       {routes.length === 0 && (

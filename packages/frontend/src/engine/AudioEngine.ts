@@ -116,8 +116,17 @@ export class AudioEngine {
 
   // Legacy direct-route LFOs (lfo1 / lfo2)
   private activeLfos: Map<1 | 2, ActiveLfo> = new Map();
-  /** Mod-matrix LFOs keyed by route id. */
-  private modLFOs: Map<string, Tone.LFO> = new Map();
+  /** Mod-matrix nodes keyed by route id (LFO, or DC Signal for modwheel). */
+  private modNodes: Map<
+    string,
+    {
+      node: Tone.LFO | Tone.Signal;
+      perVoice?: PerVoiceTarget;
+      dc?: { destination: ModDestination; depth: number };
+    }
+  > = new Map();
+  /** Mod wheel position 0..1 (MIDI CC1 or the UI slider). */
+  private modWheelValue = 0;
 
   // Polyphony
   private voices: Map<number, Voice> = new Map();
@@ -541,7 +550,28 @@ export class AudioEngine {
     }
   }
 
-  private connectLfoToVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
+  /** Update the mod wheel (0..1) — refreshes wheel-sourced DC offsets in place. */
+  setModWheel(value: number): void {
+    this.modWheelValue = clamp(value, 0, 1);
+    for (const entry of this.modNodes.values()) {
+      if (entry.dc) {
+        (entry.node as Tone.Signal).value = this.modWheelOffset(
+          entry.dc.destination,
+          entry.dc.depth,
+        );
+      }
+    }
+  }
+
+  getModWheel(): number {
+    return this.modWheelValue;
+  }
+
+  private connectLfoToVoice(
+    lfo: Tone.LFO | Tone.Signal,
+    target: PerVoiceTarget,
+    voice: Voice,
+  ): void {
     if (target === 'detune') {
       for (const unit of voice.units) {
         for (const osc of unit.oscs) lfo.connect(osc.detune);
@@ -551,7 +581,11 @@ export class AudioEngine {
     }
   }
 
-  private disconnectLfoFromVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
+  private disconnectLfoFromVoice(
+    lfo: Tone.LFO | Tone.Signal,
+    target: PerVoiceTarget,
+    voice: Voice,
+  ): void {
     try {
       if (target === 'detune') {
         for (const unit of voice.units) {
@@ -566,57 +600,14 @@ export class AudioEngine {
   }
 
   // ===== Modulation Matrix =====
-  private applyModulation(state: SynthState): void {
-    // Routes derive their ranges from these base values — include them all in
-    // the change key so turning a knob re-centers its modulators.
-    const key = JSON.stringify({
-      routes: state.modulation ?? [],
-      lfo1: [state.lfo1.rate, state.lfo1.waveform],
-      lfo2: [state.lfo2.rate, state.lfo2.waveform],
-      filterOn: state.filter.enabled,
-      cutoff: state.filter.cutoff,
-      reso: state.filter.resonance,
-      vol: state.master.volume,
-      rev: [state.effects.reverb.enabled, state.effects.reverb.mix],
-      dly: [state.effects.delay.enabled, state.effects.delay.feedback],
-    });
-    if (this.modKey === key) return;
-    this.modKey = key;
 
-    // Full rebuild of this (small) LFO set, but only when the key changed.
-    for (const lfo of this.modLFOs.values()) {
-      lfo.stop();
-      lfo.dispose();
-    }
-    this.modLFOs.clear();
-
-    for (const route of state.modulation ?? []) {
-      if (!route.enabled) continue;
-
-      const sourceLfo = route.source === 'lfo1' ? state.lfo1 : state.lfo2;
-      const target = this.getModTargetParam(route.destination);
-      if (!target) continue;
-
-      // Bipolar around 0: the param value holds the base; depth sets the
-      // swing. Negative depth = inverted phase (up becomes down).
-      const amt = Math.abs(route.depth) * bipolarRoom(target.base, target.min, target.max);
-
-      const lfo = new Tone.LFO({
-        frequency: sourceLfo.rate,
-        type: sourceLfo.waveform,
-        min: -amt,
-        max: amt,
-        phase: route.depth < 0 ? 180 : 0,
-      });
-      lfo.connect(target.param);
-      lfo.start();
-      this.modLFOs.set(route.id, lfo);
-    }
-  }
-
+  /** Resolved target for a mod route: either a global param or per-voice fan-out. */
   private getModTargetParam(
     destination: ModDestination,
-  ): { param: Tone.Param<any> | Tone.Signal<any>; base: number; min: number; max: number } | null {
+  ):
+    | { param: Tone.Param<any> | Tone.Signal<any>; base: number; min: number; max: number; perVoice?: undefined }
+    | { param?: undefined; base: number; min: number; max: number; perVoice: PerVoiceTarget }
+    | null {
     if (!this.state) return null;
     const s = this.state;
     switch (destination) {
@@ -646,8 +637,128 @@ export class AudioEngine {
           min: 0,
           max: 0.95,
         };
+      case 'effects.phaser.rate':
+        return {
+          param: this.phaser.frequency,
+          base: s.effects.phaser.rate,
+          min: 0.1,
+          max: 10,
+        };
+      case 'effects.chorus.rate':
+        return {
+          param: this.chorus.frequency,
+          base: s.effects.chorus.rate,
+          min: 0.1,
+          max: 10,
+        };
+      case 'voices.pitch':
+        // ±depth × 100 cents on every live oscillator's detune
+        return { perVoice: 'detune', base: 0, min: -100, max: 100 };
+      case 'voices.pan':
+        return { perVoice: 'pan', base: 0, min: -1, max: 1 };
       default:
         return null;
+    }
+  }
+
+  /** How far a route may swing its target (bipolar room or fixed per-voice range). */
+  private modRoom(
+    target: NonNullable<ReturnType<AudioEngine['getModTargetParam']>>,
+  ): number {
+    if (target.perVoice === 'detune') return 100;
+    if (target.perVoice === 'pan') return 0.5;
+    return bipolarRoom(target.base, target.min, target.max);
+  }
+
+  /** DC offset contributed by a modwheel route at the current wheel position. */
+  private modWheelOffset(destination: ModDestination, depth: number): number {
+    const target = this.getModTargetParam(destination);
+    if (!target) return 0;
+    return this.modWheelValue * depth * this.modRoom(target);
+  }
+
+  private connectModNode(
+    node: Tone.LFO | Tone.Signal,
+    target: NonNullable<ReturnType<AudioEngine['getModTargetParam']>>,
+  ): void {
+    if (target.perVoice) {
+      for (const voice of this.voices.values()) {
+        this.connectLfoToVoice(node as Tone.LFO, target.perVoice, voice);
+      }
+    } else if (target.param) {
+      node.connect(target.param);
+    }
+  }
+
+  private teardownModNode(entry: {
+    node: Tone.LFO | Tone.Signal;
+    perVoice?: PerVoiceTarget;
+  }): void {
+    if (entry.perVoice) {
+      for (const voice of this.voices.values()) {
+        this.disconnectLfoFromVoice(entry.node as Tone.LFO, entry.perVoice, voice);
+      }
+    }
+    if (entry.node instanceof Tone.LFO) entry.node.stop();
+    entry.node.dispose();
+  }
+
+  private applyModulation(state: SynthState): void {
+    // Routes derive their ranges from these base values — include them all in
+    // the change key so turning a knob re-centers its modulators.
+    const key = JSON.stringify({
+      routes: state.modulation ?? [],
+      lfo1: [state.lfo1.rate, state.lfo1.waveform],
+      lfo2: [state.lfo2.rate, state.lfo2.waveform],
+      filterOn: state.filter.enabled,
+      cutoff: state.filter.cutoff,
+      reso: state.filter.resonance,
+      vol: state.master.volume,
+      rev: [state.effects.reverb.enabled, state.effects.reverb.mix],
+      dly: [state.effects.delay.enabled, state.effects.delay.feedback],
+      phaser: state.effects.phaser.rate,
+      chorus: state.effects.chorus.rate,
+    });
+    if (this.modKey === key) return;
+    this.modKey = key;
+
+    // Full rebuild of this (small) node set, but only when the key changed.
+    for (const entry of this.modNodes.values()) {
+      this.teardownModNode(entry);
+    }
+    this.modNodes.clear();
+
+    for (const route of state.modulation ?? []) {
+      if (!route.enabled) continue;
+      const target = this.getModTargetParam(route.destination);
+      if (!target) continue;
+
+      if (route.source === 'modwheel') {
+        // DC source: a constant offset = wheel × depth × room.
+        const sig = new Tone.Signal(this.modWheelOffset(route.destination, route.depth));
+        this.connectModNode(sig, target);
+        this.modNodes.set(route.id, {
+          node: sig,
+          perVoice: target.perVoice,
+          dc: { destination: route.destination, depth: route.depth },
+        });
+        continue;
+      }
+
+      const sourceLfo = route.source === 'lfo1' ? state.lfo1 : state.lfo2;
+      // Bipolar around 0: the param value holds the base; depth sets the
+      // swing. Negative depth = inverted phase (up becomes down).
+      const amt = Math.abs(route.depth) * this.modRoom(target);
+      const lfo = new Tone.LFO({
+        frequency: sourceLfo.rate,
+        type: sourceLfo.waveform,
+        min: -amt,
+        max: amt,
+        phase: route.depth < 0 ? 180 : 0,
+      });
+      this.connectModNode(lfo, target);
+      lfo.start();
+      this.modNodes.set(route.id, { node: lfo, perVoice: target.perVoice });
     }
   }
 
@@ -836,9 +947,12 @@ export class AudioEngine {
   }
 
   private disposeVoice(voice: Voice): void {
-    // Detach any per-voice LFO fan-out before disposing the nodes.
+    // Detach any per-voice modulator fan-out before disposing the nodes.
     for (const { lfo, perVoice } of this.activeLfos.values()) {
       if (perVoice) this.disconnectLfoFromVoice(lfo, perVoice, voice);
+    }
+    for (const entry of this.modNodes.values()) {
+      if (entry.perVoice) this.disconnectLfoFromVoice(entry.node, entry.perVoice, voice);
     }
     for (const unit of voice.units) {
       unit.oscs.forEach((osc) => {
@@ -906,9 +1020,12 @@ export class AudioEngine {
 
     const voice: Voice = { units, gain, ampEnvelope: ampEnv, noteFrequency: frequency };
 
-    // Attach live per-voice LFOs (pitch/pan) to the new voice.
+    // Attach live per-voice modulators (legacy LFOs + mod-matrix routes).
     for (const { lfo, perVoice } of this.activeLfos.values()) {
       if (perVoice) this.connectLfoToVoice(lfo, perVoice, voice);
+    }
+    for (const entry of this.modNodes.values()) {
+      if (entry.perVoice) this.connectLfoToVoice(entry.node, entry.perVoice, voice);
     }
 
     return voice;
@@ -1054,11 +1171,10 @@ export class AudioEngine {
     for (const index of [1, 2] as const) {
       this.removeLfo(index);
     }
-    for (const lfo of this.modLFOs.values()) {
-      lfo.stop();
-      lfo.dispose();
+    for (const entry of this.modNodes.values()) {
+      this.teardownModNode(entry);
     }
-    this.modLFOs.clear();
+    this.modNodes.clear();
     this.lfoKeys = { 1: '', 2: '' };
     this.modKey = '';
     this.filterKey = '';
