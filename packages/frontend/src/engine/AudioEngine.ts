@@ -100,9 +100,12 @@ export class AudioEngine {
   private state: SynthState | null = null;
 
   // Change-detection keys so applyState() doesn't rebuild modulators
-  // (and reset their phase) when unrelated parameters change.
+  // (and reset their phase) or re-ramp unchanged sections on every edit.
   private lfoKeys: Record<1 | 2, string> = { 1: '', 2: '' };
   private modKey = '';
+  private filterKey = '';
+  private masterKey = '';
+  private effectKeys: Partial<Record<EffectId, string>> = {};
 
   // Transport for sequencer
   public transport = Tone.getTransport();
@@ -241,18 +244,38 @@ export class AudioEngine {
     this.applyMaster(state);
     this.applyLFOs(state);
     this.applyModulation(state);
+    this.applyVoices(state);
+  }
+
+  /** Smooth a continuous param (30ms default) to avoid zipper noise. */
+  private static ramp(
+    param: Tone.Param<any> | Tone.Signal<any>,
+    value: number,
+    tc = 0.03,
+  ): void {
+    param.setTargetAtTime(value, Tone.now(), tc);
+  }
+
+  private effectChanged(id: EffectId, fxState: unknown): boolean {
+    const key = JSON.stringify(fxState);
+    if (this.effectKeys[id] === key) return false;
+    this.effectKeys[id] = key;
+    return true;
   }
 
   // ===== Filter =====
   private applyFilter(state: SynthState): void {
+    const key = JSON.stringify([state.filter, state.filterEnvelope]);
+    if (this.filterKey === key) return;
+    this.filterKey = key;
+
     const f = state.filter;
-    const now = Tone.now();
     this.filter.type = f.type as BiquadFilterType;
     // Smooth ramps avoid zipper noise on knob drags. When the filter is
     // disabled we park it fully open at 20 kHz.
     const base = f.enabled ? f.cutoff : 20000;
-    this.filter.frequency.setTargetAtTime(base, now, 0.02);
-    this.filter.Q.setTargetAtTime(resonanceToQ(f.resonance), now, 0.02);
+    AudioEngine.ramp(this.filter.frequency, base, 0.02);
+    AudioEngine.ramp(this.filter.Q, resonanceToQ(f.resonance), 0.02);
 
     // Filter envelope sweep: bipolar Hz around the base cutoff
     // (envelopeAmount -1..1 → ∓/+ 8 kHz at extremes). Muted when filter off.
@@ -268,54 +291,69 @@ export class AudioEngine {
   private applyEffects(state: SynthState): void {
     const fx = state.effects;
 
-    // Reverb: size 0-1 → decay 0.1-10s; damping 0-1 → preDelay 0-0.1s
-    this.reverb.wet.value = fx.reverb.enabled ? fx.reverb.mix : 0;
-    const newDecay = Math.max(0.1, 0.1 + fx.reverb.size * 9.9);
-    // Tone.Reverb.decay is a number setter — only re-set when changed (it triggers IR regen).
-    if (Math.abs((this.reverb.decay as number) - newDecay) > 0.01) {
-      this.reverb.decay = newDecay;
+    // Each effect is guarded by a change key: untouched effects are skipped
+    // entirely, and continuous params ramp smoothly instead of stepping.
+    if (this.effectChanged('reverb', fx.reverb)) {
+      AudioEngine.ramp(this.reverb.wet, fx.reverb.enabled ? fx.reverb.mix : 0);
+      // Reverb: size 0-1 → decay 0.1-10s; damping 0-1 → preDelay 0-0.1s
+      const newDecay = Math.max(0.1, 0.1 + fx.reverb.size * 9.9);
+      // Tone.Reverb.decay is a number setter — only re-set when changed (it triggers IR regen).
+      if (Math.abs((this.reverb.decay as number) - newDecay) > 0.01) {
+        this.reverb.decay = newDecay;
+      }
+      this.reverb.preDelay = fx.reverb.damping * 0.1;
     }
-    this.reverb.preDelay = fx.reverb.damping * 0.1;
 
-    // Delay
-    this.delay.wet.value = fx.delay.enabled ? fx.delay.mix : 0;
-    this.delay.delayTime.value = fx.delay.time;
-    this.delay.feedback.value = fx.delay.feedback;
+    if (this.effectChanged('delay', fx.delay)) {
+      AudioEngine.ramp(this.delay.wet, fx.delay.enabled ? fx.delay.mix : 0);
+      // Slower glide on delay time — tape-style pitch slide while moving.
+      AudioEngine.ramp(this.delay.delayTime, fx.delay.time, 0.06);
+      AudioEngine.ramp(this.delay.feedback, fx.delay.feedback);
+    }
 
-    // Chorus
-    this.chorus.wet.value = fx.chorus.enabled ? fx.chorus.mix : 0;
-    this.chorus.frequency.value = fx.chorus.rate;
-    this.chorus.depth = fx.chorus.depth;
+    if (this.effectChanged('chorus', fx.chorus)) {
+      AudioEngine.ramp(this.chorus.wet, fx.chorus.enabled ? fx.chorus.mix : 0);
+      AudioEngine.ramp(this.chorus.frequency, fx.chorus.rate);
+      this.chorus.depth = fx.chorus.depth;
+    }
 
-    // Distortion
-    this.distortion.wet.value = fx.distortion.enabled ? fx.distortion.mix : 0;
-    this.distortion.distortion = fx.distortion.drive;
+    if (this.effectChanged('distortion', fx.distortion)) {
+      AudioEngine.ramp(this.distortion.wet, fx.distortion.enabled ? fx.distortion.mix : 0);
+      this.distortion.distortion = fx.distortion.drive;
+    }
 
-    // Compressor
-    this.compressor.threshold.value = fx.compressor.enabled ? fx.compressor.threshold : 0;
-    this.compressor.ratio.value = fx.compressor.enabled ? fx.compressor.ratio : 1;
-    this.compressor.attack.value = fx.compressor.attack;
-    this.compressor.release.value = fx.compressor.release;
+    if (this.effectChanged('compressor', fx.compressor)) {
+      AudioEngine.ramp(this.compressor.threshold, fx.compressor.enabled ? fx.compressor.threshold : 0);
+      AudioEngine.ramp(this.compressor.ratio, fx.compressor.enabled ? fx.compressor.ratio : 1);
+      this.compressor.attack.value = fx.compressor.attack;
+      this.compressor.release.value = fx.compressor.release;
+    }
 
-    // EQ3 — when disabled, flatten gains (kept in chain so reorder is consistent)
-    this.eq3.low.value = fx.eq3.enabled ? fx.eq3.low : 0;
-    this.eq3.mid.value = fx.eq3.enabled ? fx.eq3.mid : 0;
-    this.eq3.high.value = fx.eq3.enabled ? fx.eq3.high : 0;
-    this.eq3.lowFrequency.value = fx.eq3.lowFrequency;
-    this.eq3.highFrequency.value = fx.eq3.highFrequency;
+    if (this.effectChanged('eq3', fx.eq3)) {
+      // When disabled, flatten gains (kept in chain so reorder is consistent)
+      AudioEngine.ramp(this.eq3.low, fx.eq3.enabled ? fx.eq3.low : 0);
+      AudioEngine.ramp(this.eq3.mid, fx.eq3.enabled ? fx.eq3.mid : 0);
+      AudioEngine.ramp(this.eq3.high, fx.eq3.enabled ? fx.eq3.high : 0);
+      AudioEngine.ramp(this.eq3.lowFrequency, fx.eq3.lowFrequency);
+      AudioEngine.ramp(this.eq3.highFrequency, fx.eq3.highFrequency);
+    }
 
-    // Phaser
-    this.phaser.wet.value = fx.phaser.enabled ? fx.phaser.mix : 0;
-    this.phaser.frequency.value = fx.phaser.rate;
-    this.phaser.octaves = fx.phaser.octaves;
-    this.phaser.baseFrequency = fx.phaser.baseFrequency;
+    if (this.effectChanged('phaser', fx.phaser)) {
+      AudioEngine.ramp(this.phaser.wet, fx.phaser.enabled ? fx.phaser.mix : 0);
+      AudioEngine.ramp(this.phaser.frequency, fx.phaser.rate);
+      this.phaser.octaves = fx.phaser.octaves;
+      this.phaser.baseFrequency = fx.phaser.baseFrequency;
+    }
 
-    // BitCrusher
-    this.bitCrusher.wet.value = fx.bitCrusher.enabled ? fx.bitCrusher.mix : 0;
-    this.bitCrusher.bits.value = fx.bitCrusher.bits;
+    if (this.effectChanged('bitCrusher', fx.bitCrusher)) {
+      AudioEngine.ramp(this.bitCrusher.wet, fx.bitCrusher.enabled ? fx.bitCrusher.mix : 0);
+      this.bitCrusher.bits.value = fx.bitCrusher.bits;
+    }
 
-    // StereoWidener — when disabled, width=0.5 = neutral mono-ish; we use 0.5 baseline
-    this.stereoWidener.width.value = fx.stereoWidener.enabled ? fx.stereoWidener.width : 0.5;
+    if (this.effectChanged('stereoWidener', fx.stereoWidener)) {
+      // When disabled, width=0.5 = neutral mono-ish; we use 0.5 baseline
+      AudioEngine.ramp(this.stereoWidener.width, fx.stereoWidener.enabled ? fx.stereoWidener.width : 0.5);
+    }
 
     // Chain order
     const order = state.effectChain ?? DEFAULT_EFFECT_CHAIN;
@@ -334,7 +372,10 @@ export class AudioEngine {
 
   // ===== Master =====
   private applyMaster(state: SynthState): void {
-    this.masterGain.gain.setTargetAtTime(state.master.volume, Tone.now(), 0.02);
+    const key = JSON.stringify(state.master);
+    if (this.masterKey === key) return;
+    this.masterKey = key;
+    AudioEngine.ramp(this.masterGain.gain, state.master.volume, 0.02);
     this.transport.bpm.value = state.master.bpm;
   }
 
@@ -410,6 +451,7 @@ export class AudioEngine {
     const depth = lfoState.depth;
     switch (lfoState.target) {
       case 'filterCutoff': {
+        if (!this.state.filter.enabled) return null; // filter parked open — nothing to wobble
         const base = this.state.filter.cutoff;
         const amt = depth * bipolarRoom(base, 20, 20000);
         return { param: this.filter.frequency, min: -amt, max: amt };
@@ -458,6 +500,7 @@ export class AudioEngine {
       routes: state.modulation ?? [],
       lfo1: [state.lfo1.rate, state.lfo1.waveform],
       lfo2: [state.lfo2.rate, state.lfo2.waveform],
+      filterOn: state.filter.enabled,
       cutoff: state.filter.cutoff,
       reso: state.filter.resonance,
       vol: state.master.volume,
@@ -505,6 +548,7 @@ export class AudioEngine {
     const s = this.state;
     switch (destination) {
       case 'filter.cutoff':
+        if (!s.filter.enabled) return null;
         return { param: this.filter.frequency, base: s.filter.cutoff, min: 20, max: 20000 };
       case 'filter.resonance':
         return {
@@ -531,6 +575,49 @@ export class AudioEngine {
         };
       default:
         return null;
+    }
+  }
+
+  // ===== Live Voice Updates =====
+  /**
+   * Push oscillator parameter changes into currently sounding voices, so
+   * turning a knob (or the agent setting a param) is heard immediately on
+   * held notes instead of only on the next trigger. Voices whose structure
+   * no longer matches (enabled flags / unison counts changed) keep their
+   * birth timbre; the new structure applies to the next note.
+   */
+  private applyVoices(state: SynthState): void {
+    if (this.voices.size === 0) return;
+    const now = Tone.now();
+    for (const voice of this.voices.values()) {
+      const expected = state.oscillators.reduce(
+        (n, o) => n + (o.enabled ? Math.max(1, o.unison) : 0),
+        0,
+      );
+      if (expected !== voice.oscillators.length) continue;
+
+      let i = 0;
+      for (const oscState of state.oscillators) {
+        if (!oscState.enabled) continue;
+        const count = Math.max(1, oscState.unison);
+        const freq =
+          voice.noteFrequency *
+          Math.pow(2, oscState.semitone / 12) *
+          Math.pow(2, oscState.fine / 1200);
+        const perVoiceVolume = oscState.volume / Math.sqrt(count);
+        for (let u = 0; u < count; u++, i++) {
+          const centered = u - (count - 1) / 2;
+          const detuneOffset = count > 1 ? centered * (oscState.unisonSpread / count) : 0;
+          const panOffset = count > 1 ? centered * (0.8 / count) : 0;
+          const osc = voice.oscillators[i];
+          const panner = voice.panners[i];
+          osc.frequency.setTargetAtTime(freq, now, 0.02);
+          osc.detune.setTargetAtTime(oscState.detune + detuneOffset, now, 0.02);
+          // gainToDb(0) = -Infinity breaks exponential ramps — clamp.
+          osc.volume.setTargetAtTime(Math.max(-60, Tone.gainToDb(perVoiceVolume)), now, 0.03);
+          panner.pan.setTargetAtTime(clamp(oscState.pan + panOffset, -1, 1), now, 0.03);
+        }
+      }
     }
   }
 
@@ -729,6 +816,9 @@ export class AudioEngine {
     this.modLFOs.clear();
     this.lfoKeys = { 1: '', 2: '' };
     this.modKey = '';
+    this.filterKey = '';
+    this.masterKey = '';
+    this.effectKeys = {};
 
     this.filterEnv.dispose();
     this.filterEnvAmount.dispose();
