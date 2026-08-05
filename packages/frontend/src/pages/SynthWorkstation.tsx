@@ -21,12 +21,45 @@ export default function SynthWorkstation() {
   const toggleAgent = useAgentStore((s) => s.togglePanel);
   const agentOpen = useAgentStore((s) => s.panelOpen);
   const togglePresetBrowser = usePresetStore((s) => s.toggleBrowser);
+  const undo = useSynthStore((s) => s.undo);
+  const redo = useSynthStore((s) => s.redo);
+  const canUndo = useSynthStore((s) => s.past.length > 0);
+  const canRedo = useSynthStore((s) => s.future.length > 0);
 
   // Sync engine on mount
   useEffect(() => {
     const engine = getAudioEngine();
     engine.applyState(synthState);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Global undo/redo shortcuts (Ctrl/Cmd+Z, Shift+Ctrl/Cmd+Z, Ctrl+Y).
+  // VirtualKeyboard already ignores chorded keys, so no conflict there.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return; // don't hijack text editing (e.g. the agent chat box)
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (key === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [undo, redo]);
 
   return (
     <div className="h-full flex flex-col bg-bg-primary">
@@ -42,6 +75,22 @@ export default function SynthWorkstation() {
         </div>
         <MasterPanel />
         <div className="flex items-center gap-2">
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            title="撤销 (Ctrl+Z)"
+            className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            ↩ Undo
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            title="重做 (Ctrl+Shift+Z / Ctrl+Y)"
+            className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            ↪ Redo
+          </button>
           <button
             onClick={togglePresetBrowser}
             className="px-3 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors"

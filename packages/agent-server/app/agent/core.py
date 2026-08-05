@@ -19,6 +19,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - 管理 **调制矩阵**（set_mod_route），把 LFO 路由到目标参数
 - 演示声音（play_notes 播放音符）
 - 保存预设（save_preset）
+- 快照与撤销：snapshot_patch 保存恢复点 / restore_snapshot 恢复 / undo_last_change 撤销最近改动
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
 
@@ -28,7 +29,8 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 3. **解释你的思路**：告诉用户你为什么做这个调整
 4. **安全优先**：不要突然把音量调到最大,避免爆音
 5. **用户优先**：如果用户刚修改了某个参数,不要立即覆盖它
-6. **播放演示**：调完参数后用 play_notes 让用户听效果
+6. **大胆实验可回滚**：做大幅实验性改动前先 snapshot_patch；用户不满意就 restore_snapshot。单个改动需要回退时用 undo_last_change
+7. **播放演示**：调完参数后用 play_notes 让用户听效果
    - 多个音同时演奏（和弦）→ mode='chord'（默认）
    - 多个音依次演奏（旋律/琶音）→ mode='sequence', 配合 interval 控制节奏
    - duration 通常 0.5-1.5s, interval 0.2-0.5s
@@ -314,6 +316,11 @@ class AgentSession:
 
                     if "save_preset" in result:
                         yield {"type": "save_preset", **result["save_preset"]}
+
+                    # Side-effect-only commands the frontend executes
+                    for cmd_key in ("undo", "snapshot", "restore_snapshot"):
+                        if cmd_key in result:
+                            yield {"type": cmd_key}
 
                     messages.append(Message(
                         role="tool",

@@ -10,6 +10,12 @@ interface SynthStore {
   isPlaying: boolean;
   activeNotes: Set<number>;
 
+  /** Undo history (immutable snapshots — immer COW makes sharing safe). */
+  past: SynthState[];
+  future: SynthState[];
+  /** Restore point saved by the AI agent (snapshot_patch tool). */
+  agentSnapshot: SynthState | null;
+
   // Actions
   setSynthState: (state: SynthState) => void;
   /**
@@ -22,6 +28,11 @@ interface SynthStore {
    * Returns true when the mutation was applied.
    */
   applyMutation: (path: string, value: unknown) => boolean;
+  undo: () => void;
+  redo: () => void;
+  takeSnapshot: () => void;
+  /** Restore the agent snapshot. Returns false when none exists. */
+  restoreSnapshot: () => boolean;
   updateOscillator: (index: number, partial: Partial<OscillatorState>) => void;
   updateFilter: (partial: Partial<FilterState>) => void;
   updateAmpEnvelope: (partial: Partial<EnvelopeState>) => void;
@@ -38,6 +49,13 @@ interface SynthStore {
   panic: () => void;
 }
 
+/** Edits closer than this are coalesced into a single history entry
+ *  (knob drags, agent bursts). */
+const HISTORY_COALESCE_MS = 800;
+const HISTORY_LIMIT = 100;
+/** Module-level coalescing clock (not UI state, doesn't belong in the store). */
+let lastEditAt = 0;
+
 export const useSynthStore = create<SynthStore>()(
   immer((set, get) => {
     const syncEngine = () => {
@@ -45,16 +63,83 @@ export const useSynthStore = create<SynthStore>()(
       engine.applyState(get().state);
     };
 
+    /**
+     * Push the current state onto the undo stack. Snapshots are shared by
+     * reference — immer never mutates frozen base states, so this is O(1).
+     */
+    const recordHistory = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastEditAt <= HISTORY_COALESCE_MS) {
+        lastEditAt = now;
+        return;
+      }
+      lastEditAt = now;
+      const current = get().state;
+      set((draft) => {
+        draft.past.push(current);
+        if (draft.past.length > HISTORY_LIMIT) draft.past.shift();
+        draft.future = [];
+      });
+    };
+
     return {
       state: createDefaultSynthState(),
       isPlaying: false,
       activeNotes: new Set<number>(),
+      past: [],
+      future: [],
+      agentSnapshot: null,
 
       setSynthState: (newState) => {
+        recordHistory(true); // discrete wholesale change (e.g. preset load)
         set((draft) => {
           draft.state = newState;
         });
         syncEngine();
+      },
+
+      undo: () => {
+        const { past, state } = get();
+        if (past.length === 0) return;
+        const previous = past[past.length - 1];
+        lastEditAt = 0; // next edit starts a fresh history entry
+        set((draft) => {
+          draft.past.pop();
+          draft.future.push(state);
+          draft.state = previous;
+        });
+        syncEngine();
+      },
+
+      redo: () => {
+        const { future, state } = get();
+        if (future.length === 0) return;
+        const next = future[future.length - 1];
+        lastEditAt = 0;
+        set((draft) => {
+          draft.future.pop();
+          draft.past.push(state);
+          draft.state = next;
+        });
+        syncEngine();
+      },
+
+      takeSnapshot: () => {
+        const current = get().state;
+        set((draft) => {
+          draft.agentSnapshot = current;
+        });
+      },
+
+      restoreSnapshot: () => {
+        const snap = get().agentSnapshot;
+        if (!snap) return false;
+        recordHistory(true); // the restore itself is undoable
+        set((draft) => {
+          draft.state = snap;
+        });
+        syncEngine();
+        return true;
       },
 
       applyMutation: (path, value) => {
@@ -92,6 +177,7 @@ export const useSynthStore = create<SynthStore>()(
           console.warn(`applyMutation rejected: ${result.error}`);
           return false;
         }
+        recordHistory();
         set((draft) => {
           setByPath(draft.state, path, result.value);
         });
@@ -100,6 +186,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateOscillator: (index, partial) => {
+        recordHistory();
         set((draft) => {
           Object.assign(draft.state.oscillators[index], partial);
         });
@@ -107,6 +194,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateFilter: (partial) => {
+        recordHistory();
         set((draft) => {
           Object.assign(draft.state.filter, partial);
         });
@@ -114,6 +202,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateAmpEnvelope: (partial) => {
+        recordHistory();
         set((draft) => {
           Object.assign(draft.state.ampEnvelope, partial);
         });
@@ -121,6 +210,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateFilterEnvelope: (partial) => {
+        recordHistory();
         set((draft) => {
           Object.assign(draft.state.filterEnvelope, partial);
         });
@@ -128,6 +218,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateLFO: (index, partial) => {
+        recordHistory();
         set((draft) => {
           const key = index === 1 ? 'lfo1' : 'lfo2';
           Object.assign(draft.state[key], partial);
@@ -136,6 +227,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateEffects: (partial) => {
+        recordHistory();
         set((draft) => {
           // Deep merge for nested effect objects
           for (const [key, value] of Object.entries(partial)) {
@@ -151,6 +243,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       reorderEffectChain: (newOrder) => {
+        recordHistory();
         set((draft) => {
           draft.state.effectChain = newOrder;
         });
@@ -158,6 +251,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       addModRoute: (partial) => {
+        recordHistory();
         set((draft) => {
           if (!draft.state.modulation) draft.state.modulation = [];
           const id =
@@ -176,6 +270,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateModRoute: (id, partial) => {
+        recordHistory();
         set((draft) => {
           const list = draft.state.modulation;
           if (!list) return;
@@ -186,6 +281,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       removeModRoute: (id) => {
+        recordHistory();
         set((draft) => {
           if (!draft.state.modulation) return;
           draft.state.modulation = draft.state.modulation.filter((r) => r.id !== id);
@@ -194,6 +290,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       updateMaster: (partial) => {
+        recordHistory();
         set((draft) => {
           Object.assign(draft.state.master, partial);
         });

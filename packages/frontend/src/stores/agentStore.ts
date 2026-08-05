@@ -56,6 +56,9 @@ interface StreamCallbacks {
   onMutation?: (m: Mutation) => void;
   onPlay?: (p: PlayCommand) => void;
   onSavePreset?: (p: { name: string; tags: string[] }) => void;
+  onUndo?: () => void;
+  onSnapshot?: () => void;
+  onRestoreSnapshot?: () => void;
 }
 
 interface AgentActions {
@@ -353,6 +356,12 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                 name: String(evt.name || 'Untitled'),
                 tags: Array.isArray(evt.tags) ? evt.tags : [],
               });
+            } else if (evt.type === 'undo') {
+              callbacks?.onUndo?.();
+            } else if (evt.type === 'snapshot') {
+              callbacks?.onSnapshot?.();
+            } else if (evt.type === 'restore_snapshot') {
+              callbacks?.onRestoreSnapshot?.();
             } else if (evt.type === 'done') {
               ws.close();
               finish();

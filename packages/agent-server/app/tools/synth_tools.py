@@ -338,6 +338,30 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "snapshot_patch",
+            "description": "Save the current synth state as a restore point (overwrites the previous one). Use BEFORE making bold/experimental changes, so you can roll back if the user dislikes the result.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restore_snapshot",
+            "description": "Restore the synth state saved by snapshot_patch. Use when the user wants to go back to the sound before your experimental changes.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "undo_last_change",
+            "description": "Undo the most recent synth parameter change (yours or the user's). Use when the user says 'undo'/'revert', or to step back one edit.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -432,6 +456,27 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "result": f"Preset '{name}' saved to user device.",
                 "mutations": [],
                 "save_preset": {"name": name, "tags": tags},
+            }
+
+        case "snapshot_patch":
+            return {
+                "result": "Snapshot saved. The current patch can be restored later with restore_snapshot.",
+                "mutations": [],
+                "snapshot": True,
+            }
+
+        case "restore_snapshot":
+            return {
+                "result": "Snapshot restore requested.",
+                "mutations": [],
+                "restore_snapshot": True,
+            }
+
+        case "undo_last_change":
+            return {
+                "result": "Undo requested.",
+                "mutations": [],
+                "undo": True,
             }
 
         case "explain_concept":

@@ -100,6 +100,12 @@ export default function AgentPanel() {
           savePreset(name, stateNow, tags);
         }
       },
+      onUndo: () => useSynthStore.getState().undo(),
+      onSnapshot: () => useSynthStore.getState().takeSnapshot(),
+      onRestoreSnapshot: () => {
+        const ok = useSynthStore.getState().restoreSnapshot();
+        if (!ok) console.warn('restore_snapshot: no snapshot has been taken yet');
+      },
     });
   };
 
