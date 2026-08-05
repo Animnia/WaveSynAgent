@@ -10,6 +10,7 @@ import type { AgentMessage, Mutation, PlayCommand } from '@/stores/agentStore';
 import { useSynthStore } from '@/stores/synthStore';
 import { usePresetStore } from '@/stores/presetStore';
 import { getAudioEngine } from '@/engine/AudioEngine';
+import { captureAudioFeatures } from '@/engine/audioAnalysis';
 import AgentHistoryDrawer from './AgentHistoryDrawer';
 
 const PANEL_WIDTH = 420;
@@ -106,6 +107,16 @@ export default function AgentPanel() {
       onRestoreSnapshot: () => {
         const ok = useSynthStore.getState().restoreSnapshot();
         if (!ok) console.warn('restore_snapshot: no snapshot has been taken yet');
+      },
+      onAnalyze: async (req) => {
+        // Be the agent's ears: ring the requested notes through the live
+        // patch and capture what actually comes out of the engine.
+        await getAudioEngine().start();
+        const notes =
+          Array.isArray(req.notes) && req.notes.length > 0 ? req.notes : [60, 64, 67];
+        const duration = Math.min(3, Math.max(0.5, Number(req.duration) || 1.5));
+        handlePlay({ notes, velocity: 100, duration, mode: 'chord' });
+        return captureAudioFeatures(getAudioEngine(), duration * 1000);
       },
     });
   };

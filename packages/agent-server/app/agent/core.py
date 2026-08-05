@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator
 
 from ..config import settings
 from ..providers.base import LLMProvider, LLMResponse, Message
-from ..tools.synth_tools import SYNTH_TOOLS, execute_tool
+from ..tools.synth_tools import SYNTH_TOOLS, AnalysisChannel, execute_tool_async
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - 演示声音（play_notes 播放音符）
 - 保存预设（save_preset）
 - 快照与撤销：snapshot_patch 保存恢复点 / restore_snapshot 恢复 / undo_last_change 撤销最近改动
+- 音频分析：analyze_audio 播放音符并分析实际输出（响度/削波/明亮度/频段分布），用于验证调音结果
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
 
@@ -30,7 +31,8 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 4. **安全优先**：不要突然把音量调到最大,避免爆音
 5. **用户优先**：如果用户刚修改了某个参数,不要立即覆盖它
 6. **大胆实验可回滚**：做大幅实验性改动前先 snapshot_patch；用户不满意就 restore_snapshot。单个改动需要回退时用 undo_last_change
-7. **播放演示**：调完参数后用 play_notes 让用户听效果
+7. **用耳朵验证**：完成一轮调参后用 analyze_audio 验证实际输出——目标是温暖就确认 centroid 偏低（<800Hz）、目标明亮就确认偏高（>2.5kHz）；响度目标 RMS 约 -20~-10 dBFS，出现削波立即降音量。不满意就继续调整再分析，形成闭环
+8. **播放演示**：调完参数后用 play_notes 让用户听效果
    - 多个音同时演奏（和弦）→ mode='chord'（默认）
    - 多个音依次演奏（旋律/琶音）→ mode='sequence', 配合 interval 控制节奏
    - duration 通常 0.5-1.5s, interval 0.2-0.5s
@@ -75,10 +77,16 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 class AgentSession:
     """Manages a single agent conversation session."""
 
-    def __init__(self, provider: LLMProvider, synth_state: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        synth_state: dict[str, Any] | None = None,
+        channel: AnalysisChannel | None = None,
+    ):
         self.provider = provider
         self.messages: list[Message] = [Message(role="system", content=SYSTEM_PROMPT)]
         self.synth_state: dict[str, Any] = synth_state or {}
+        self.channel = channel
         self.total_tool_calls = 0
 
     @staticmethod
@@ -183,7 +191,9 @@ class AgentSession:
                 thinking_steps.append({"tool": tc.name, "args": str(tc.arguments)})
 
                 try:
-                    result = execute_tool(tc.name, dict(tc.arguments), self.synth_state)
+                    result = await execute_tool_async(
+                        tc.name, dict(tc.arguments), self.synth_state, self.channel
+                    )
 
                     # Apply mutations to local state copy (best-effort; frontend re-applies authoritatively)
                     for mut in result.get("mutations", []):
@@ -308,7 +318,9 @@ class AgentSession:
                 yield {"type": "thinking", "tool": tc.name, "args": str(tc.arguments)}
 
                 try:
-                    result = execute_tool(tc.name, dict(tc.arguments), self.synth_state)
+                    result = await execute_tool_async(
+                        tc.name, dict(tc.arguments), self.synth_state, self.channel
+                    )
 
                     for mut in result.get("mutations", []):
                         try:

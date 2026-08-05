@@ -6,7 +6,7 @@ to control the synthesizer. Results are sent back to the frontend via WebSocket.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 from .param_specs import validate_mutations
 
@@ -362,6 +362,36 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "analyze_audio",
+            "description": (
+                "Play notes through the current patch and analyze the ACTUAL audio output: "
+                "loudness (RMS/peak dBFS), clipping, brightness (spectral centroid Hz), and "
+                "band balance (sub/low-mid/presence/air in dB). Use this to VERIFY your work — "
+                "e.g. after designing a 'warm pad', check the centroid is low and sub/presence "
+                "balanced. Closes the loop: adjust → analyze → re-adjust."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 21, "maximum": 108},
+                        "description": "MIDI notes to ring (played as a chord). Default: C major triad [60, 64, 67].",
+                    },
+                    "duration": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 3,
+                        "description": "Capture window in seconds (default 1.5). Use longer for slow-attack pads.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -378,6 +408,83 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
 
 
 # ─── Tool execution ───
+
+class AnalysisChannel(Protocol):
+    """Channel back to the client for audio analysis (implemented by the WS layer)."""
+
+    async def request_analysis(self, payload: dict[str, Any]) -> dict[str, Any] | None: ...
+
+
+async def execute_tool_async(
+    tool_name: str,
+    arguments: dict[str, Any],
+    synth_state: dict[str, Any],
+    channel: AnalysisChannel | None = None,
+) -> dict[str, Any]:
+    """Async variant of execute_tool for tools that need a client round-trip."""
+    if tool_name == "analyze_audio":
+        return await _analyze_audio(arguments, channel)
+    return execute_tool(tool_name, arguments, synth_state)
+
+
+async def _analyze_audio(args: dict, channel: AnalysisChannel | None) -> dict:
+    if channel is None:
+        return {"result": "audio analysis unavailable (no client connection)", "mutations": []}
+
+    notes = args.get("notes") or [60, 64, 67]
+    if not isinstance(notes, list):
+        notes = [60, 64, 67]
+    notes = [max(21, min(108, int(n))) for n in notes[:8] if isinstance(n, (int, float))]
+    if not notes:
+        notes = [60, 64, 67]
+    try:
+        duration = float(args.get("duration") or 1.5)
+    except (TypeError, ValueError):
+        duration = 1.5
+    duration = max(0.5, min(3.0, duration))
+
+    features = await channel.request_analysis({"notes": notes, "duration": duration})
+    if features is None:
+        return {
+            "result": "audio analysis failed (client did not respond — audio may be locked until the user interacts with the page)",
+            "mutations": [],
+        }
+    return {"result": _format_analysis(features), "mutations": []}
+
+
+def _format_analysis(f: dict[str, Any]) -> str:
+    """Render captured audio features as an interpretive summary for the LLM."""
+    if f.get("silent"):
+        return (
+            f"Analysis: SILENCE (RMS {f.get('rms_db', '?')} dBFS over {f.get('duration_ms', '?')} ms). "
+            "No audible output — check that oscillators are enabled with volume > 0, "
+            "the amp envelope attack isn't extremely long, and the master volume is up."
+        )
+
+    centroid = f.get("spectral_centroid_hz")
+    if centroid is None:
+        brightness = "unknown"
+    elif centroid < 800:
+        brightness = "dark/warm"
+    elif centroid < 2500:
+        brightness = "balanced"
+    elif centroid < 5000:
+        brightness = "bright"
+    else:
+        brightness = "very bright/harsh"
+
+    bands = f.get("band_db", {})
+    clip = "CLIPPING (reduce volume/mix)!" if f.get("clipping") else "no clipping"
+    return (
+        f"Analysis of {f.get('duration_ms', '?')} ms of audio: "
+        f"RMS {f.get('rms_db', '?')} dBFS, peak {f.get('peak_db', '?')} dBFS ({clip}). "
+        f"Brightness: centroid {centroid} Hz → {brightness}. "
+        f"Bands (dB): sub(20-120Hz) {bands.get('sub', '?')} | "
+        f"low-mid(120-800) {bands.get('low_mid', '?')} | "
+        f"presence(0.8-4k) {bands.get('presence', '?')} | "
+        f"air(4-16k) {bands.get('air', '?')}."
+    )
+
 
 def validate_range(value: Any, min_val: float, max_val: float, name: str) -> float | int:
     """Validate a numeric parameter is within range."""
@@ -477,6 +584,14 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "result": "Undo requested.",
                 "mutations": [],
                 "undo": True,
+            }
+
+        case "analyze_audio":
+            # Requires the async path (execute_tool_async) with a live client
+            # channel — the frontend plays and measures, not the server.
+            return {
+                "result": "analyze_audio is only available over the streaming WebSocket API.",
+                "mutations": [],
             }
 
         case "explain_concept":

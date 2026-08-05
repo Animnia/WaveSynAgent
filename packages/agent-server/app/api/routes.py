@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -77,6 +78,50 @@ async def list_providers() -> dict:
 
 # ─── WebSocket endpoint for real-time agent interaction ───
 
+ANALYZE_TIMEOUT_S = 20
+
+
+class WsFrontendChannel:
+    """Server-side handle for request/response round-trips to the client.
+
+    The agent's analyze_audio tool needs the *frontend* to play and measure
+    audio; this channel correlates analyze_request → analyze_result over the
+    persistent socket.
+    """
+
+    def __init__(self, ws: WebSocket):
+        self._ws = ws
+        self._pending: dict[str, asyncio.Future] = {}
+
+    async def request_analysis(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        request_id = uuid.uuid4().hex[:12]
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        self._pending[request_id] = fut
+        try:
+            await self._ws.send_json({
+                "type": "analyze_request",
+                "request_id": request_id,
+                **payload,
+            })
+            return await asyncio.wait_for(fut, timeout=ANALYZE_TIMEOUT_S)
+        except (TimeoutError, asyncio.CancelledError):
+            return None
+        finally:
+            self._pending.pop(request_id, None)
+
+    def resolve(self, request_id: str, features: Any) -> None:
+        fut = self._pending.get(request_id)
+        if fut is not None and not fut.done():
+            fut.set_result(features)
+
+    def fail_all(self) -> None:
+        for fut in self._pending.values():
+            if not fut.done():
+                fut.set_result(None)
+        self._pending.clear()
+
+
 @router.websocket("/ws")
 async def agent_websocket(ws: WebSocket):
     """Persistent WebSocket endpoint for streaming agent interaction.
@@ -90,6 +135,7 @@ async def agent_websocket(ws: WebSocket):
     Client → Server:
     - {"type": "chat", "message": ..., "history": [...], "synthState": {...}, "provider":? }
     - {"type": "cancel"}                    — abort the running turn
+    - {"type": "analyze_result", "request_id": ..., "features": {...} | null}
     - {"type": "ping"}
 
     Server → Client:
@@ -98,6 +144,7 @@ async def agent_websocket(ws: WebSocket):
     - {"type": "mutation", "path": ..., "value": ...}
     - {"type": "play", "notes": [...], ...}
     - {"type": "save_preset" | "undo" | "snapshot" | "restore_snapshot", ...}
+    - {"type": "analyze_request", "request_id": ..., "notes": [...], "duration": ...}
     - {"type": "usage", "prompt_tokens": n, "completion_tokens": n}
     - {"type": "error", "message": ...}     — fatal for the current turn
     - {"type": "cancelled"}                  — confirms a cancel request
@@ -106,6 +153,7 @@ async def agent_websocket(ws: WebSocket):
     await ws.accept()
 
     current_task: asyncio.Task | None = None
+    channel = WsFrontendChannel(ws)
 
     async def run_turn(msg: dict[str, Any]) -> None:
         try:
@@ -117,6 +165,7 @@ async def agent_websocket(ws: WebSocket):
         session = AgentSession(
             provider=provider,
             synth_state=msg.get("synthState", {}),
+            channel=channel,
         )
         try:
             async for event in session.chat_stream(msg["message"], history=msg.get("history", [])):
@@ -159,6 +208,9 @@ async def agent_websocket(ws: WebSocket):
                 if current_task and not current_task.done():
                     current_task.cancel()
 
+            elif mtype == "analyze_result":
+                channel.resolve(str(msg.get("request_id", "")), msg.get("features"))
+
             elif mtype == "ping":
                 await ws.send_json({"type": "pong"})
 
@@ -167,6 +219,7 @@ async def agent_websocket(ws: WebSocket):
     except Exception as e:
         logger.error(f"Agent WS error: {e}")
     finally:
+        channel.fail_all()
         if current_task and not current_task.done():
             current_task.cancel()
 

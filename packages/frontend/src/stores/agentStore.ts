@@ -56,6 +56,12 @@ interface AgentState {
   historyDrawerOpen: boolean;
 }
 
+export interface AnalyzeRequest {
+  request_id: string;
+  notes?: number[];
+  duration?: number;
+}
+
 interface StreamCallbacks {
   onMutation?: (m: Mutation) => void;
   onPlay?: (p: PlayCommand) => void;
@@ -63,6 +69,8 @@ interface StreamCallbacks {
   onUndo?: () => void;
   onSnapshot?: () => void;
   onRestoreSnapshot?: () => void;
+  /** Play + analyze audio, returning features to relay to the agent. */
+  onAnalyze?: (req: AnalyzeRequest) => Promise<unknown>;
 }
 
 interface AgentActions {
@@ -469,6 +477,28 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                 case 'restore_snapshot':
                   callbacks?.onRestoreSnapshot?.();
                   break;
+                case 'analyze_request': {
+                  // The agent asked us to be its ears: play notes, analyze,
+                  // and relay the features back over the same socket.
+                  const req = evt as unknown as AnalyzeRequest;
+                  void (async () => {
+                    try {
+                      const features = (await callbacks?.onAnalyze?.(req)) ?? null;
+                      sendPayload({
+                        type: 'analyze_result',
+                        request_id: req.request_id,
+                        features,
+                      });
+                    } catch {
+                      sendPayload({
+                        type: 'analyze_result',
+                        request_id: req.request_id,
+                        features: null,
+                      });
+                    }
+                  })();
+                  break;
+                }
                 case 'error': {
                   const msg = String(evt.message || '未知错误');
                   updateAssistant((m) => {
