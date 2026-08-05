@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useSynthStore } from '@/stores/synthStore';
 import { getAudioEngine } from '@/engine/AudioEngine';
 import OscillatorPanel from '@/components/synth/OscillatorPanel';
@@ -17,6 +17,7 @@ import PresetBrowser from '@/components/presets/PresetBrowser';
 import { usePresetStore } from '@/stores/presetStore';
 import SequencerPanel from '@/components/synth/SequencerPanel';
 import { useSequencerStore } from '@/stores/sequencerStore';
+import { exportCurrentPatch } from '@/utils/export';
 
 export default function SynthWorkstation() {
   const synthState = useSynthStore((s) => s.state);
@@ -30,6 +31,18 @@ export default function SynthWorkstation() {
   const sequencerOpen = useSequencerStore((s) => s.panelOpen);
   const sequencerPlaying = useSequencerStore((s) => s.playing);
   const toggleSequencer = useSequencerStore((s) => s.togglePanel);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportCurrentPatch();
+    } catch (err) {
+      console.error('Export failed:', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Sync engine on mount
   useEffect(() => {
@@ -95,6 +108,14 @@ export default function SynthWorkstation() {
             className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
             ↪ Redo
+          </button>
+          <button
+            onClick={() => void handleExport()}
+            disabled={exporting}
+            title="将当前音色（或序列器 loop）渲染为 WAV 并下载"
+            className="px-3 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30"
+          >
+            {exporting ? '⏺ Rendering…' : '⬇ Export'}
           </button>
           <button
             onClick={toggleSequencer}

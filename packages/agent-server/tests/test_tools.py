@@ -247,3 +247,20 @@ class TestSequencerTools:
         assert stop["sequencer_control"] == "stop"
         bad = execute_tool("sequencer_control", {"action": "explode"}, synth_state)
         assert "sequencer_control" not in bad
+
+
+class TestExportAudio:
+    def test_defaults(self, synth_state):
+        result = execute_tool("export_audio", {}, synth_state)
+        assert result["export_audio"] == {}
+
+    def test_clamps_and_sanitizes(self, synth_state):
+        result = execute_tool(
+            "export_audio",
+            {"bars": 99, "duration": -5, "notes": [60, 999, "x", 64]},
+            synth_state,
+        )
+        payload = result["export_audio"]
+        assert payload["bars"] == 8
+        assert payload["duration"] == 0.5
+        assert payload["notes"] == [60, 64]

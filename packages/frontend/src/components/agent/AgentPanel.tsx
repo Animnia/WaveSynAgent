@@ -12,6 +12,7 @@ import { usePresetStore } from '@/stores/presetStore';
 import { useSequencerStore } from '@/stores/sequencerStore';
 import { getAudioEngine } from '@/engine/AudioEngine';
 import { captureAudioFeatures } from '@/engine/audioAnalysis';
+import { exportCurrentPatch } from '@/utils/export';
 import AgentHistoryDrawer from './AgentHistoryDrawer';
 
 const PANEL_WIDTH = 420;
@@ -142,6 +143,9 @@ export default function AgentPanel() {
         } else {
           store.stop();
         }
+      },
+      onExportAudio: (payload) => {
+        void exportCurrentPatch(payload);
       },
     });
   };

@@ -445,6 +445,30 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "export_audio",
+            "description": (
+                "Render the current patch to a WAV file that downloads on the user's device. "
+                "If a sequencer pattern exists it loops for 'bars' bars; otherwise a demo chord "
+                "('notes') rings for 'duration' seconds. Use when the user asks to export/bounce/save audio."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bars": {"type": "integer", "minimum": 1, "maximum": 8, "description": "Pattern loops (when a pattern exists). Default 2."},
+                    "duration": {"type": "number", "minimum": 0.5, "maximum": 30, "description": "Seconds for the chord demo (no pattern). Default 3."},
+                    "notes": {
+                        "type": "array",
+                        "items": {"type": "integer", "minimum": 21, "maximum": 108},
+                        "description": "Chord for the demo render (default C major triad).",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -636,6 +660,23 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "result": f"Sequencer {action}.",
                 "mutations": [],
                 "sequencer_control": action,
+            }
+
+        case "export_audio":
+            payload: dict[str, Any] = {}
+            if isinstance(arguments.get("bars"), (int, float)):
+                payload["bars"] = max(1, min(8, int(arguments["bars"])))
+            if isinstance(arguments.get("duration"), (int, float)):
+                payload["duration"] = max(0.5, min(30.0, float(arguments["duration"])))
+            notes = arguments.get("notes")
+            if isinstance(notes, list) and notes:
+                payload["notes"] = [
+                    int(n) for n in notes[:8] if isinstance(n, (int, float)) and 21 <= n <= 108
+                ]
+            return {
+                "result": "Rendering WAV on the user's device (download starts automatically).",
+                "mutations": [],
+                "export_audio": payload,
             }
 
         case "restore_snapshot":

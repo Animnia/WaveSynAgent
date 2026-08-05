@@ -121,6 +121,19 @@ export class AudioEngine {
   public transport = Tone.getTransport();
 
   private started = false;
+  /**
+   * Offline-render mode: no wall-clock voice disposal (OfflineAudioContext
+   * renders faster than real time, so setTimeout-based cleanup would fire
+   * mid-render and cut release tails). The whole context is discarded after
+   * rendering, making disposal unnecessary.
+   */
+  private offlineMode = false;
+
+  /** Mark the engine ready for offline rendering (no user gesture exists). */
+  markOffline(): void {
+    this.started = true;
+    this.offlineMode = true;
+  }
 
   constructor() {
     // Master output chain: filter → effects → masterGain → analysers → destination
@@ -663,7 +676,9 @@ export class AudioEngine {
       try {
         existing.ampEnvelope.triggerRelease(at);
       } catch { /* already released */ }
-      setTimeout(() => this.disposeVoice(existing), 300);
+      if (!this.offlineMode) {
+        setTimeout(() => this.disposeVoice(existing), 300);
+      }
     }
 
     // Steal oldest voice if at max
@@ -715,10 +730,12 @@ export class AudioEngine {
     voice.ampEnvelope.triggerRelease(at);
 
     // Disposal waits for both a future scheduled release and the tail.
-    const disposeInMs = Math.max(0, (at - now) * 1000) + (releaseTime + 0.1) * 1000;
-    setTimeout(() => {
-      this.disposeVoice(voice);
-    }, disposeInMs);
+    if (!this.offlineMode) {
+      const disposeInMs = Math.max(0, (at - now) * 1000) + (releaseTime + 0.1) * 1000;
+      setTimeout(() => {
+        this.disposeVoice(voice);
+      }, disposeInMs);
+    }
   }
 
   private disposeVoice(voice: Voice): void {

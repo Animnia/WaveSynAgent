@@ -21,6 +21,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - 保存预设（save_preset）
 - 快照与撤销：snapshot_patch 保存恢复点 / restore_snapshot 恢复 / undo_last_change 撤销最近改动
 - 步进序列器：sequence_pattern 编写 16/32 步循环 pattern（走当前音色）/ sequencer_control 启停——用户能从序列器面板看到并逐步修改你写的 pattern
+- WAV 导出：export_audio 把当前音色（或序列器 loop）离线渲染成 WAV 并自动下载
 - 音频分析：analyze_audio 播放音符并分析实际输出（响度/削波/明亮度/频段分布），用于验证调音结果
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
@@ -346,6 +347,9 @@ class AgentSession:
 
                     if "sequencer_control" in result:
                         yield {"type": "sequencer_control", "action": result["sequencer_control"]}
+
+                    if "export_audio" in result:
+                        yield {"type": "export_audio", **result["export_audio"]}
 
                     messages.append(Message(
                         role="tool",
