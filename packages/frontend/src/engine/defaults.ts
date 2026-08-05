@@ -77,7 +77,7 @@ export function createDefaultSynthState(): SynthState {
       waveform: 'triangle',
       rate: 0.5,
       depth: 0.2,
-      target: 'wavetablePosition',
+      target: 'pan',
       sync: false,
     },
     effects: {

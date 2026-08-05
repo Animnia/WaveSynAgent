@@ -21,7 +21,6 @@ export const MOD_TARGETS: ModTargetSpec[] = [
   { id: 'master.volume',         label: 'Master Volume',  min: 0,     max: 1 },
   { id: 'effects.reverb.mix',    label: 'Reverb Mix',     min: 0,     max: 1 },
   { id: 'effects.delay.feedback',label: 'Delay Feedback', min: 0,     max: 0.95 },
-  { id: 'effects.chorus.depth',  label: 'Chorus Depth',   min: 0,     max: 1 },
 ];
 
 export const MOD_SOURCES: { id: 'lfo1' | 'lfo2'; label: string }[] = [

@@ -55,7 +55,6 @@ export interface EnvelopeState {
 // ===== LFO Types =====
 export type LFOWaveform = 'sine' | 'square' | 'sawtooth' | 'triangle';
 export type LFOTarget =
-  | 'wavetablePosition'
   | 'filterCutoff'
   | 'volume'
   | 'pan'
@@ -81,8 +80,7 @@ export type ModDestination =
   | 'filter.resonance'
   | 'master.volume'
   | 'effects.reverb.mix'
-  | 'effects.delay.feedback'
-  | 'effects.chorus.depth';
+  | 'effects.delay.feedback';
 
 export interface ModRoute {
   id: string;

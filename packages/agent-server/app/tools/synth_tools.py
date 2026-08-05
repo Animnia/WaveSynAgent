@@ -91,7 +91,7 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                     "waveform": {"type": "string", "enum": ["sine", "triangle", "sawtooth", "square"]},
                     "rate": {"type": "number", "minimum": 0.01, "maximum": 50, "description": "Rate in Hz"},
                     "depth": {"type": "number", "minimum": 0, "maximum": 1},
-                    "target": {"type": "string", "enum": ["filterCutoff", "volume", "pitch", "pan", "wavetablePosition"]},
+                    "target": {"type": "string", "enum": ["filterCutoff", "volume", "pitch", "pan"]},
                 },
                 "required": ["index"],
             },
@@ -247,8 +247,7 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                             "filter.resonance",
                             "master.volume",
                             "effects.reverb.mix",
-                            "effects.delay.feedback",
-                            "effects.chorus.depth"
+                            "effects.delay.feedback"
                         ],
                     },
                     "depth": {"type": "number", "minimum": -1, "maximum": 1, "description": "Bipolar modulation depth."},

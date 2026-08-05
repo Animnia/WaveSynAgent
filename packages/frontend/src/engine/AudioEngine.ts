@@ -3,7 +3,6 @@ import type {
   SynthState,
   OscillatorState,
   LFOState,
-  LFOTarget,
   EffectId,
   ModDestination,
 } from './types';
@@ -17,25 +16,61 @@ function resonanceToQ(r: number): number {
   return 0.5 + r * 17.5;
 }
 
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v));
+}
+
 interface Voice {
   oscillators: Tone.Oscillator[];
+  /** One panner per oscillator (enables per-osc pan + unison stereo spread). */
+  panners: Tone.Panner[];
   gain: Tone.Gain;
-  panner: Tone.Panner;
   ampEnvelope: Tone.AmplitudeEnvelope;
   noteFrequency: number;
 }
 
+type PerVoiceTarget = 'detune' | 'pan';
+
+interface ActiveLfo {
+  lfo: Tone.LFO;
+  /** When set, the LFO fans out to this param on every live voice. */
+  perVoice?: PerVoiceTarget;
+}
+
 /**
- * Core wavetable synthesizer engine built on Tone.js.
+ * How far an LFO may swing a bipolar target around its base value without
+ * leaving [min, max]. Returns the symmetric amplitude (always >= 0).
+ */
+function bipolarRoom(base: number, min: number, max: number): number {
+  return Math.max(0, Math.min(base - min, max - base));
+}
+
+/**
+ * Core polyphonic synthesizer engine built on Tone.js.
  * Manages oscillators, filter, envelopes, LFOs, and effects.
+ *
+ * Signal path: osc → per-osc panner → amp envelope → velocity gain
+ *            → shared filter → reorderable FX chain → master gain → out.
+ *
+ * The filter is intentionally *paraphonic* (shared across voices, like the
+ * Moog Matriarch's paraphonic mode): the filter envelope retriggers on each
+ * note-on and key tracking follows the last played note.
+ *
+ * Modulation convention: a Tone.Param's `.value` always holds the base value
+ * and every connected LFO signal is bipolar around 0, so modulation sums on
+ * top of the knob position instead of replacing it. (Tone sums connected
+ * signals with the param value.)
  */
 export class AudioEngine {
   private masterGain: Tone.Gain;
   private analyserNode: Tone.Waveform;
   private fftAnalyser: Tone.FFT;
 
-  // Filter chain
+  // Filter (shared / paraphonic)
   private filter: Tone.BiquadFilter;
+  /** Filter envelope: ADSR (0..1) → filterEnvAmount (Hz, bipolar) → filter.frequency */
+  private filterEnv: Tone.Envelope;
+  private filterEnvAmount: Tone.Gain;
 
   // Effects
   private reverb: Tone.Reverb;
@@ -52,9 +87,8 @@ export class AudioEngine {
   /** Current chain order (effect ids only — does not include filter/master). */
   private currentChainOrder: EffectId[] = [...DEFAULT_EFFECT_CHAIN];
 
-  // LFOs
-  private lfo1: Tone.LFO | null = null;
-  private lfo2: Tone.LFO | null = null;
+  // Legacy direct-route LFOs (lfo1 / lfo2)
+  private activeLfos: Map<1 | 2, ActiveLfo> = new Map();
   /** Mod-matrix LFOs keyed by route id. */
   private modLFOs: Map<string, Tone.LFO> = new Map();
 
@@ -64,6 +98,11 @@ export class AudioEngine {
 
   // Current state reference
   private state: SynthState | null = null;
+
+  // Change-detection keys so applyState() doesn't rebuild modulators
+  // (and reset their phase) when unrelated parameters change.
+  private lfoKeys: Record<1 | 2, string> = { 1: '', 2: '' };
+  private modKey = '';
 
   // Transport for sequencer
   public transport = Tone.getTransport();
@@ -81,6 +120,18 @@ export class AudioEngine {
       frequency: 5000,
       Q: resonanceToQ(0.2),
     });
+
+    // Paraphonic filter envelope: ADSR 0..1 scaled to a bipolar Hz sweep and
+    // summed into filter.frequency (whose value holds the base cutoff).
+    this.filterEnv = new Tone.Envelope({
+      attack: 0.05,
+      decay: 0.4,
+      sustain: 0.3,
+      release: 0.5,
+    });
+    this.filterEnvAmount = new Tone.Gain(0);
+    this.filterEnv.connect(this.filterEnvAmount);
+    this.filterEnvAmount.connect(this.filter.frequency);
 
     // Effects (all start bypassed)
     this.reverb = new Tone.Reverb({ decay: 2, wet: 0 });
@@ -195,9 +246,22 @@ export class AudioEngine {
   // ===== Filter =====
   private applyFilter(state: SynthState): void {
     const f = state.filter;
+    const now = Tone.now();
     this.filter.type = f.type as BiquadFilterType;
-    this.filter.frequency.value = f.enabled ? f.cutoff : 20000;
-    this.filter.Q.value = resonanceToQ(f.resonance);
+    // Smooth ramps avoid zipper noise on knob drags. When the filter is
+    // disabled we park it fully open at 20 kHz.
+    const base = f.enabled ? f.cutoff : 20000;
+    this.filter.frequency.setTargetAtTime(base, now, 0.02);
+    this.filter.Q.setTargetAtTime(resonanceToQ(f.resonance), now, 0.02);
+
+    // Filter envelope sweep: bipolar Hz around the base cutoff
+    // (envelopeAmount -1..1 → ∓/+ 8 kHz at extremes). Muted when filter off.
+    this.filterEnvAmount.gain.value = f.enabled ? f.envelopeAmount * 8000 : 0;
+    const fe = state.filterEnvelope;
+    this.filterEnv.attack = fe.attack;
+    this.filterEnv.decay = fe.decay;
+    this.filterEnv.sustain = fe.sustain;
+    this.filterEnv.release = fe.release;
   }
 
   // ===== Effects =====
@@ -270,7 +334,7 @@ export class AudioEngine {
 
   // ===== Master =====
   private applyMaster(state: SynthState): void {
-    this.masterGain.gain.value = state.master.volume;
+    this.masterGain.gain.setTargetAtTime(state.master.volume, Tone.now(), 0.02);
     this.transport.bpm.value = state.master.bpm;
   }
 
@@ -281,129 +345,190 @@ export class AudioEngine {
   }
 
   private applyLFO(lfoState: LFOState, index: 1 | 2): void {
-    const existing = index === 1 ? this.lfo1 : this.lfo2;
+    // Target ranges derive from the current cutoff/volume, so those base
+    // values participate in the change-detection key.
+    const key = JSON.stringify({
+      s: lfoState,
+      cutoff: this.state?.filter.cutoff,
+      filterOn: this.state?.filter.enabled,
+      vol: this.state?.master.volume,
+    });
+    if (this.lfoKeys[index] === key) return; // nothing relevant changed — keep phase
+    this.lfoKeys[index] = key;
 
-    if (existing) {
-      existing.stop();
-      existing.dispose();
-    }
+    this.removeLfo(index);
 
-    if (!lfoState.enabled) {
-      if (index === 1) this.lfo1 = null;
-      else this.lfo2 = null;
-      return;
-    }
+    if (!lfoState.enabled) return;
 
-    const target = this.getLFOTarget(lfoState.target);
-    if (!target) return;
+    const spec = this.getLFOTarget(lfoState);
+    if (!spec) return;
 
     const lfo = new Tone.LFO({
       frequency: lfoState.rate,
       type: lfoState.waveform,
-      min: target.min,
-      max: target.max,
+      min: spec.min,
+      max: spec.max,
     });
 
-    lfo.connect(target.param);
+    if (spec.perVoice) {
+      for (const voice of this.voices.values()) {
+        this.connectLfoToVoice(lfo, spec.perVoice, voice);
+      }
+      this.activeLfos.set(index, { lfo, perVoice: spec.perVoice });
+    } else if (spec.param) {
+      lfo.connect(spec.param);
+      this.activeLfos.set(index, { lfo });
+    }
     lfo.start();
-
-    if (index === 1) this.lfo1 = lfo;
-    else this.lfo2 = lfo;
   }
 
+  private removeLfo(index: 1 | 2): void {
+    const existing = this.activeLfos.get(index);
+    if (!existing) return;
+    const { lfo, perVoice } = existing;
+    if (perVoice) {
+      for (const voice of this.voices.values()) {
+        this.disconnectLfoFromVoice(lfo, perVoice, voice);
+      }
+    }
+    lfo.stop();
+    lfo.dispose();
+    this.activeLfos.delete(index);
+  }
+
+  /**
+   * Resolve an LFO target. Connected signals sum with the param's own value,
+   * so all ranges here are bipolar around 0 (the base lives in `.value`).
+   */
   private getLFOTarget(
-    target: LFOTarget,
-  ): { param: Tone.Param<any> | Tone.Signal<any>; min: number; max: number } | null {
+    lfoState: LFOState,
+  ):
+    | { param: Tone.Param<any> | Tone.Signal<any>; min: number; max: number; perVoice?: undefined }
+    | { param?: undefined; min: number; max: number; perVoice: PerVoiceTarget }
+    | null {
     if (!this.state) return null;
-    switch (target) {
+    const depth = lfoState.depth;
+    switch (lfoState.target) {
       case 'filterCutoff': {
         const base = this.state.filter.cutoff;
-        const depth = this.state.lfo1.depth;
-        return {
-          param: this.filter.frequency,
-          min: Math.max(20, base * (1 - depth)),
-          max: Math.min(20000, base * (1 + depth)),
-        };
+        const amt = depth * bipolarRoom(base, 20, 20000);
+        return { param: this.filter.frequency, min: -amt, max: amt };
       }
-      case 'volume':
-        return {
-          param: this.masterGain.gain,
-          min: 0,
-          max: this.state.master.volume,
-        };
+      case 'volume': {
+        const base = this.state.master.volume;
+        const amt = depth * bipolarRoom(base, 0, 1);
+        return { param: this.masterGain.gain, min: -amt, max: amt };
+      }
+      case 'pitch':
+        // Vibrato: ±depth * 100 cents on every live oscillator's detune.
+        return { min: -depth * 100, max: depth * 100, perVoice: 'detune' };
+      case 'pan':
+        // Auto-pan: ±depth * 0.5 on every live voice panner (panner clamps).
+        return { min: -depth * 0.5, max: depth * 0.5, perVoice: 'pan' };
       default:
         return null;
     }
   }
 
+  private connectLfoToVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
+    if (target === 'detune') {
+      for (const osc of voice.oscillators) lfo.connect(osc.detune);
+    } else {
+      for (const panner of voice.panners) lfo.connect(panner.pan);
+    }
+  }
+
+  private disconnectLfoFromVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
+    try {
+      if (target === 'detune') {
+        for (const osc of voice.oscillators) lfo.disconnect(osc.detune);
+      } else {
+        for (const panner of voice.panners) lfo.disconnect(panner.pan);
+      }
+    } catch {
+      // Already disconnected / disposed — safe to ignore.
+    }
+  }
+
   // ===== Modulation Matrix =====
   private applyModulation(state: SynthState): void {
-    const routes = state.modulation ?? [];
-    const seenIds = new Set<string>();
+    // Routes derive their ranges from these base values — include them all in
+    // the change key so turning a knob re-centers its modulators.
+    const key = JSON.stringify({
+      routes: state.modulation ?? [],
+      lfo1: [state.lfo1.rate, state.lfo1.waveform],
+      lfo2: [state.lfo2.rate, state.lfo2.waveform],
+      cutoff: state.filter.cutoff,
+      reso: state.filter.resonance,
+      vol: state.master.volume,
+      rev: [state.effects.reverb.enabled, state.effects.reverb.mix],
+      dly: [state.effects.delay.enabled, state.effects.delay.feedback],
+    });
+    if (this.modKey === key) return;
+    this.modKey = key;
 
-    for (const route of routes) {
-      seenIds.add(route.id);
-      const existing = this.modLFOs.get(route.id);
-      if (existing) {
-        existing.stop();
-        existing.disconnect();
-        existing.dispose();
-        this.modLFOs.delete(route.id);
-      }
+    // Full rebuild of this (small) LFO set, but only when the key changed.
+    for (const lfo of this.modLFOs.values()) {
+      lfo.stop();
+      lfo.dispose();
+    }
+    this.modLFOs.clear();
+
+    for (const route of state.modulation ?? []) {
       if (!route.enabled) continue;
 
       const sourceLfo = route.source === 'lfo1' ? state.lfo1 : state.lfo2;
-      // Mod-matrix LFOs are independent of the legacy lfo1/lfo2 direct routing —
-      // we read source's rate/waveform but still create a fresh Tone.LFO so this
-      // route's depth doesn't fight the legacy LFO's own target wiring.
       const target = this.getModTargetParam(route.destination);
       if (!target) continue;
 
-      const center = target.param.value as number;
-      const range = (target.max - target.min) * route.depth;
-      // Bipolar: oscillate around current value within ±range/2, clamped to limits.
-      const min = Math.max(target.min, center - Math.abs(range) / 2);
-      const max = Math.min(target.max, center + Math.abs(range) / 2);
+      // Bipolar around 0: the param value holds the base; depth sets the
+      // swing. Negative depth = inverted phase (up becomes down).
+      const amt = Math.abs(route.depth) * bipolarRoom(target.base, target.min, target.max);
 
       const lfo = new Tone.LFO({
         frequency: sourceLfo.rate,
         type: sourceLfo.waveform,
-        min,
-        max,
+        min: -amt,
+        max: amt,
+        phase: route.depth < 0 ? 180 : 0,
       });
       lfo.connect(target.param);
       lfo.start();
       this.modLFOs.set(route.id, lfo);
     }
-
-    // Dispose any stale routes
-    for (const [id, lfo] of this.modLFOs.entries()) {
-      if (!seenIds.has(id)) {
-        lfo.stop();
-        lfo.disconnect();
-        lfo.dispose();
-        this.modLFOs.delete(id);
-      }
-    }
   }
 
   private getModTargetParam(
     destination: ModDestination,
-  ): { param: Tone.Param<any> | Tone.Signal<any>; min: number; max: number } | null {
+  ): { param: Tone.Param<any> | Tone.Signal<any>; base: number; min: number; max: number } | null {
+    if (!this.state) return null;
+    const s = this.state;
     switch (destination) {
       case 'filter.cutoff':
-        return { param: this.filter.frequency, min: 20, max: 20000 };
+        return { param: this.filter.frequency, base: s.filter.cutoff, min: 20, max: 20000 };
       case 'filter.resonance':
-        return { param: this.filter.Q, min: 0.5, max: 18 };
+        return {
+          param: this.filter.Q,
+          base: resonanceToQ(s.filter.resonance),
+          min: 0.5,
+          max: 18,
+        };
       case 'master.volume':
-        return { param: this.masterGain.gain, min: 0, max: 1 };
+        return { param: this.masterGain.gain, base: s.master.volume, min: 0, max: 1 };
       case 'effects.reverb.mix':
-        return { param: this.reverb.wet, min: 0, max: 1 };
+        return {
+          param: this.reverb.wet,
+          base: s.effects.reverb.enabled ? s.effects.reverb.mix : 0,
+          min: 0,
+          max: 1,
+        };
       case 'effects.delay.feedback':
-        return { param: this.delay.feedback, min: 0, max: 0.95 };
-      case 'effects.chorus.depth':
-        // Tone.Chorus.depth is a number, not a Param — skip (no smooth modulation possible)
-        return null;
+        return {
+          param: this.delay.feedback,
+          base: s.effects.delay.enabled ? s.effects.delay.feedback : 0,
+          min: 0,
+          max: 0.95,
+        };
       default:
         return null;
     }
@@ -441,6 +566,23 @@ export class AudioEngine {
       if (oldest !== undefined) this.noteOff(oldest);
     }
 
+    // Paraphonic filter envelope: retrigger per note; key tracking follows
+    // the last played note (classic shared-filter behaviour).
+    const f = this.state.filter;
+    if (f.enabled) {
+      if (f.keyTracking > 0) {
+        const tracked = clamp(
+          f.cutoff * Math.pow(2, ((midiNote - 60) / 12) * f.keyTracking),
+          20,
+          20000,
+        );
+        this.filter.frequency.setTargetAtTime(tracked, Tone.now(), 0.005);
+      }
+      if (f.envelopeAmount !== 0) {
+        this.filterEnv.triggerAttack();
+      }
+    }
+
     const freq = midiToFrequency(midiNote);
     const voice = this.createVoice(freq, velocity / 127);
     this.voices.set(midiNote, voice);
@@ -456,6 +598,11 @@ export class AudioEngine {
     // the captured voice reference safely.
     this.voices.delete(midiNote);
 
+    // Release the shared filter envelope only when the last voice lets go.
+    if (this.voices.size === 0 && this.state?.filter.enabled) {
+      this.filterEnv.triggerRelease();
+    }
+
     const releaseTime = this.state?.ampEnvelope.release ?? 0.3;
     voice.ampEnvelope.triggerRelease();
 
@@ -465,12 +612,16 @@ export class AudioEngine {
   }
 
   private disposeVoice(voice: Voice): void {
+    // Detach any per-voice LFO fan-out before disposing the nodes.
+    for (const { lfo, perVoice } of this.activeLfos.values()) {
+      if (perVoice) this.disconnectLfoFromVoice(lfo, perVoice, voice);
+    }
     voice.oscillators.forEach((osc) => {
       try { osc.stop(); } catch { /* noop */ }
       osc.dispose();
     });
+    voice.panners.forEach((p) => p.dispose());
     voice.gain.dispose();
-    voice.panner.dispose();
     voice.ampEnvelope.dispose();
   }
 
@@ -490,59 +641,70 @@ export class AudioEngine {
       release: state.ampEnvelope.release,
     });
     const gain = new Tone.Gain(velocityGain);
-    const panner = new Tone.Panner(0);
 
     const oscillators: Tone.Oscillator[] = [];
+    const panners: Tone.Panner[] = [];
 
     for (const oscState of state.oscillators) {
       if (!oscState.enabled) continue;
-      const oscs = this.createOscillatorVoices(oscState, frequency);
+      const { oscs, pans } = this.createOscillatorVoices(oscState, frequency);
       oscillators.push(...oscs);
+      panners.push(...pans);
     }
 
-    // Route: oscillators → ampEnvelope → gain → panner → filter (→ effects chain)
-    oscillators.forEach((osc) => osc.connect(ampEnv));
+    // Route: osc → panner → ampEnvelope → velocity gain → filter (→ FX chain)
+    oscillators.forEach((osc, i) => {
+      osc.connect(panners[i]);
+      panners[i].connect(ampEnv);
+    });
     ampEnv.connect(gain);
-    gain.connect(panner);
-    panner.connect(this.filter);
+    gain.connect(this.filter);
 
     oscillators.forEach((osc) => osc.start());
 
-    return { oscillators, gain, panner, ampEnvelope: ampEnv, noteFrequency: frequency };
+    const voice: Voice = { oscillators, panners, gain, ampEnvelope: ampEnv, noteFrequency: frequency };
+
+    // Attach live per-voice LFOs (pitch/pan) to the new voice.
+    for (const { lfo, perVoice } of this.activeLfos.values()) {
+      if (perVoice) this.connectLfoToVoice(lfo, perVoice, voice);
+    }
+
+    return voice;
   }
 
   private createOscillatorVoices(
     oscState: OscillatorState,
     baseFreq: number,
-  ): Tone.Oscillator[] {
+  ): { oscs: Tone.Oscillator[]; pans: Tone.Panner[] } {
     const semitoneRatio = Math.pow(2, oscState.semitone / 12);
     const fineRatio = Math.pow(2, oscState.fine / 1200);
     const freq = baseFreq * semitoneRatio * fineRatio;
 
     const type = oscState.type === 'custom' ? 'sawtooth' : oscState.type;
+    const count = Math.max(1, oscState.unison);
+    const perVoiceVolume = oscState.volume / Math.sqrt(count);
 
-    if (oscState.unison <= 1) {
-      // 2-arg constructor: the options-object overload uses a discriminated
-      // union on `type` that plain ToneOscillatorType doesn't satisfy.
-      const osc = new Tone.Oscillator(freq, type as Tone.ToneOscillatorType);
-      osc.volume.value = Tone.gainToDb(oscState.volume);
-      osc.detune.value = oscState.detune;
-      return [osc];
-    }
-
-    // Unison voices
-    const voices: Tone.Oscillator[] = [];
-    const count = oscState.unison;
-    const spreadPerVoice = oscState.unisonSpread / count;
+    const oscs: Tone.Oscillator[] = [];
+    const pans: Tone.Panner[] = [];
 
     for (let i = 0; i < count; i++) {
-      const detuneOffset = (i - (count - 1) / 2) * spreadPerVoice;
+      // Unison detune spread (cents) and stereo spread (±0.8 max) are both
+      // centered on the oscillator's own detune/pan settings.
+      const centered = i - (count - 1) / 2;
+      const detuneOffset = count > 1 ? centered * (oscState.unisonSpread / count) : 0;
+      const panOffset = count > 1 ? centered * (0.8 / count) : 0;
+
+      // 2-arg constructor: the options-object overload is a discriminated
+      // union on `type` that plain ToneOscillatorType doesn't satisfy.
       const osc = new Tone.Oscillator(freq, type as Tone.ToneOscillatorType);
-      osc.volume.value = Tone.gainToDb(oscState.volume / Math.sqrt(count));
+      osc.volume.value = Tone.gainToDb(perVoiceVolume);
       osc.detune.value = oscState.detune + detuneOffset;
-      voices.push(osc);
+
+      const panner = new Tone.Panner(clamp(oscState.pan + panOffset, -1, 1));
+      oscs.push(osc);
+      pans.push(panner);
     }
-    return voices;
+    return { oscs, pans };
   }
 
   // ===== Analysis =====
@@ -557,16 +719,19 @@ export class AudioEngine {
   // ===== Cleanup =====
   dispose(): void {
     this.panic();
-    this.lfo1?.stop();
-    this.lfo1?.dispose();
-    this.lfo2?.stop();
-    this.lfo2?.dispose();
+    for (const index of [1, 2] as const) {
+      this.removeLfo(index);
+    }
     for (const lfo of this.modLFOs.values()) {
       lfo.stop();
       lfo.dispose();
     }
     this.modLFOs.clear();
+    this.lfoKeys = { 1: '', 2: '' };
+    this.modKey = '';
 
+    this.filterEnv.dispose();
+    this.filterEnvAmount.dispose();
     this.filter.dispose();
     for (const node of this.effectNodes.values()) {
       node.dispose();

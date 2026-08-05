@@ -14,7 +14,6 @@ const LFO_TARGETS: { value: LFOTarget; label: string }[] = [
   { value: 'volume', label: 'Vol' },
   { value: 'pitch', label: 'Pitch' },
   { value: 'pan', label: 'Pan' },
-  { value: 'wavetablePosition', label: 'WT Pos' },
 ];
 
 interface LFOPanelProps {

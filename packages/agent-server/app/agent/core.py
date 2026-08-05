@@ -37,7 +37,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - Oscillator: type ∈ {sine, triangle, sawtooth, square} | Volume 0-1 | Semitone ±24 | Fine ±100 cents | Unison 1-8
 - Filter: type ∈ {lowpass, highpass, bandpass, notch} | cutoff 20-20000 Hz | resonance 0-1
 - ADSR: Attack/Decay 0.001-5s | Sustain 0-1 | Release 0.001-10s
-- LFO: rate 0.01-50 Hz | depth 0-1 | target ∈ {filterCutoff, volume, pitch, pan, wavetablePosition}
+- LFO: rate 0.01-50 Hz | depth 0-1 | target ∈ {filterCutoff, volume, pitch, pan}
 - Reverb/Delay/Chorus/Distortion: mix/size/damping/drive 0-1 | delay time 0.01-2s | feedback 0-0.95
 - Compressor: threshold -60..0 dB | ratio 1-20 | attack 0.001-1s | release 0.01-1s
 - EQ3: low/mid/high ±24 dB | lowFreq 50-1000 | highFreq 1000-10000 Hz
@@ -52,7 +52,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
   - operation="update" 更新已有路由 (需 id)
   - operation="remove" 删除路由 (需 id)
 - source: lfo1 | lfo2
-- destination: filter.cutoff | filter.resonance | master.volume | effects.reverb.mix | effects.delay.feedback | effects.chorus.depth
+- destination: filter.cutoff | filter.resonance | master.volume | effects.reverb.mix | effects.delay.feedback
 - depth 是 **双极** 的 (-1..1)，正负决定调制方向
 
 ## 效果链
