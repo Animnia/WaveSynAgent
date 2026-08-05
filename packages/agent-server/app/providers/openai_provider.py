@@ -99,6 +99,9 @@ class OpenAIProvider(LLMProvider):
             "messages": self._to_oai_messages(messages),
             "temperature": temperature,
             "stream": True,
+            # Ask for a final usage chunk (OpenAI/DeepSeek/DashScope all
+            # support this in compatible mode).
+            "stream_options": {"include_usage": True},
         }
         if tools:
             kwargs["tools"] = tools
@@ -111,8 +114,16 @@ class OpenAIProvider(LLMProvider):
         # tool calls accumulator keyed by index
         tc_acc: dict[int, dict[str, str]] = {}
         finish_reason = "stop"
+        usage: dict[str, int] = {}
 
         async for chunk in stream:
+            # The terminal usage chunk carries no choices — read it first.
+            chunk_usage = getattr(chunk, "usage", None)
+            if chunk_usage is not None:
+                usage = {
+                    "prompt_tokens": getattr(chunk_usage, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(chunk_usage, "completion_tokens", 0) or 0,
+                }
             if not chunk.choices:
                 continue
             choice = chunk.choices[0]
@@ -164,7 +175,7 @@ class OpenAIProvider(LLMProvider):
             reasoning_content="".join(reasoning_parts) or None,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
-            usage={},
+            usage=usage,
         )
         yield {"type": "done", "response": response}
 

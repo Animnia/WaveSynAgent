@@ -26,6 +26,7 @@ export default function AgentPanel() {
   const panelOpen = useAgentStore((s) => s.panelOpen);
   const togglePanel = useAgentStore((s) => s.togglePanel);
   const streamMessage = useAgentStore((s) => s.streamMessage);
+  const cancelStream = useAgentStore((s) => s.cancelStream);
   const provider = useAgentStore((s) => s.provider);
   const setProvider = useAgentStore((s) => s.setProvider);
   const availableProviders = useAgentStore((s) => s.availableProviders);
@@ -227,13 +228,23 @@ export default function AgentPanel() {
           />
           <div className="flex justify-between items-center">
             <span className="text-[10px] text-text-muted">Enter 发送 · Shift+Enter 换行</span>
-            <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-              className="px-4 py-1.5 bg-text-primary text-bg-tertiary text-xs font-medium hover:bg-text-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded"
-            >
-              {isLoading ? '生成中...' : '发送'}
-            </button>
+            {isLoading ? (
+              <button
+                onClick={cancelStream}
+                className="px-4 py-1.5 bg-accent-red/80 text-white text-xs font-medium hover:bg-accent-red transition-colors rounded"
+                title="中断当前生成"
+              >
+                ■ 停止
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="px-4 py-1.5 bg-text-primary text-bg-tertiary text-xs font-medium hover:bg-text-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded"
+              >
+                发送
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -289,6 +300,17 @@ function MessageItem({ message }: { message: AgentMessage }) {
         <div className="md-content">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
           {message.streaming && <span className="streaming-caret" />}
+        </div>
+      )}
+
+      {/* Cancelled marker + token usage */}
+      {message.cancelled && (
+        <div className="mt-1 text-[10px] text-text-muted">■ 已停止</div>
+      )}
+      {message.usage && (message.usage.prompt + message.usage.completion > 0) && (
+        <div className="mt-1 text-[10px] text-text-muted">
+          tokens {message.usage.prompt + message.usage.completion}
+          （输入 {message.usage.prompt} / 输出 {message.usage.completion}）
         </div>
       )}
 

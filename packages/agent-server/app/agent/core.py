@@ -275,6 +275,12 @@ class AgentSession:
             if response is None:
                 break
 
+            # Surface token usage when the provider reports it
+            if response.usage:
+                usage_event = {k: v for k, v in response.usage.items() if v}
+                if usage_event:
+                    yield {"type": "usage", **usage_event}
+
             # No tool calls — final assistant turn
             if not response.tool_calls:
                 messages.append(Message(

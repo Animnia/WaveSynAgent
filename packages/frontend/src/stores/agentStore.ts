@@ -30,6 +30,10 @@ export interface AgentMessage {
   mutations?: Mutation[];
   playCommands?: PlayCommand[];
   streaming?: boolean;
+  /** Set when the user aborted this turn mid-generation. */
+  cancelled?: boolean;
+  /** Accumulated token usage reported by the provider. */
+  usage?: { prompt: number; completion: number };
   timestamp: number;
 }
 
@@ -76,6 +80,8 @@ interface AgentActions {
     synthState: SynthState,
     callbacks?: StreamCallbacks,
   ) => Promise<void>;
+  /** Abort the currently streaming turn (protocol v2). */
+  cancelStream: () => void;
 
   // settings / UI
   setProvider: (provider: string) => void;
@@ -90,6 +96,99 @@ const HISTORY_LIMIT = 50;
 function buildWsUrl(): string {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}${AGENT_BASE}/api/agent/ws`;
+}
+
+// ── Persistent WebSocket layer ──────────────────────────────────────────
+// One long-lived connection per tab (protocol v2). At most one turn is
+// active at a time; its events are dispatched to `activeTurn`. The socket
+// reconnects with capped backoff and pings to survive proxy idle timeouts.
+
+const PING_INTERVAL_MS = 25_000;
+const TURN_WATCHDOG_MS = 120_000;
+const MAX_RECONNECT_DELAY_MS = 10_000;
+
+interface ActiveTurn {
+  onEvent: (evt: Record<string, unknown>) => void;
+  onDisconnect: () => void;
+}
+
+let socket: WebSocket | null = null;
+let activeTurn: ActiveTurn | null = null;
+let sendQueue: string[] = [];
+let pingTimer: number | undefined;
+let reconnectTimer: number | undefined;
+let reconnectDelay = 1000;
+
+function scheduleReconnect(): void {
+  if (reconnectTimer !== undefined) return;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = undefined;
+    reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS);
+    ensureSocket();
+  }, reconnectDelay);
+}
+
+function ensureSocket(): void {
+  if (
+    socket &&
+    (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+  try {
+    socket = new WebSocket(buildWsUrl());
+  } catch {
+    scheduleReconnect();
+    return;
+  }
+
+  socket.onopen = () => {
+    reconnectDelay = 1000;
+    const queued = sendQueue;
+    sendQueue = [];
+    for (const payload of queued) socket?.send(payload);
+    pingTimer = window.setInterval(() => {
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, PING_INTERVAL_MS);
+  };
+
+  socket.onmessage = (ev) => {
+    let evt: Record<string, unknown>;
+    try {
+      evt = JSON.parse(ev.data as string);
+    } catch {
+      return;
+    }
+    activeTurn?.onEvent(evt);
+  };
+
+  socket.onclose = () => {
+    if (pingTimer !== undefined) {
+      window.clearInterval(pingTimer);
+      pingTimer = undefined;
+    }
+    socket = null;
+    // A dead socket kills any in-flight turn server-side; drop queued
+    // payloads so a stale chat doesn't replay after reconnect.
+    sendQueue = [];
+    activeTurn?.onDisconnect();
+    scheduleReconnect();
+  };
+
+  socket.onerror = () => {
+    // Browsers fire onclose right after — teardown happens there.
+  };
+}
+
+function sendPayload(payload: Record<string, unknown>): void {
+  const data = JSON.stringify(payload);
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(data);
+  } else if (sendQueue.length < 10) {
+    sendQueue.push(data);
+  }
 }
 
 function newSession(title = 'New Chat'): ConversationSession {
@@ -281,24 +380,14 @@ export const useAgentStore = create<AgentState & AgentActions>()(
         };
 
         return new Promise<void>((resolve) => {
-          let ws: WebSocket;
-          try {
-            ws = new WebSocket(buildWsUrl());
-          } catch (err) {
-            updateAssistant((m) => {
-              m.role = 'system';
-              m.content = `WebSocket 连接失败: ${err instanceof Error ? err.message : '未知错误'}`;
-              m.streaming = false;
-            });
-            set((s) => { s.isLoading = false; });
-            resolve();
-            return;
-          }
-
           let settled = false;
+          let lastEventAt = Date.now();
+
           const finish = () => {
             if (settled) return;
             settled = true;
+            window.clearInterval(watchdog);
+            activeTurn = null;
             updateAssistant((m) => { m.streaming = false; });
             set((s) => {
               s.isLoading = false;
@@ -308,78 +397,129 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             resolve();
           };
 
-            ws.onopen = () => {
-            ws.send(
-              JSON.stringify({
-                type: 'chat',
-                message,
-                history,
-                synthState,
-                // Omit provider when unset — the backend default applies.
-                ...(get().provider ? { provider: get().provider } : {}),
-              }),
-            );
-          };
-
-          ws.onmessage = (ev) => {
-            let evt: any;
-            try {
-              evt = JSON.parse(ev.data);
-            } catch {
-              return;
-            }
-
-            if (evt.type === 'thinking') {
+          // If nothing arrives for too long (hung LLM call, dead proxy),
+          // settle the turn so the UI never gets stuck in "生成中...".
+          const watchdog = window.setInterval(() => {
+            if (Date.now() - lastEventAt > TURN_WATCHDOG_MS) {
               updateAssistant((m) => {
-                m.thinking!.push({ tool: evt.tool, args: evt.args });
+                m.role = 'system';
+                m.content = (m.content ? m.content + '\n\n' : '') + '⚠️ Agent 响应超时，请重试。';
               });
-            } else if (evt.type === 'mutation') {
-              const mut: Mutation = { path: evt.path, value: evt.value };
-              updateAssistant((m) => { m.mutations!.push(mut); });
-              callbacks?.onMutation?.(mut);
-            } else if (evt.type === 'play') {
-              const play: PlayCommand = {
-                notes: evt.notes,
-                velocity: evt.velocity ?? 100,
-                duration: evt.duration ?? 0.5,
-                mode: evt.mode === 'sequence' ? 'sequence' : 'chord',
-                interval: typeof evt.interval === 'number' ? evt.interval : undefined,
-              };
-              updateAssistant((m) => { m.playCommands!.push(play); });
-              callbacks?.onPlay?.(play);
-            } else if (evt.type === 'text_delta') {
-              updateAssistant((m) => { m.content += evt.delta ?? ''; });
-            } else if (evt.type === 'text') {
-              updateAssistant((m) => { m.content = evt.content; });
-            } else if (evt.type === 'save_preset') {
-              callbacks?.onSavePreset?.({
-                name: String(evt.name || 'Untitled'),
-                tags: Array.isArray(evt.tags) ? evt.tags : [],
-              });
-            } else if (evt.type === 'undo') {
-              callbacks?.onUndo?.();
-            } else if (evt.type === 'snapshot') {
-              callbacks?.onSnapshot?.();
-            } else if (evt.type === 'restore_snapshot') {
-              callbacks?.onRestoreSnapshot?.();
-            } else if (evt.type === 'done') {
-              ws.close();
               finish();
             }
-          };
+          }, 5_000);
 
-          ws.onerror = () => {
-            updateAssistant((m) => {
-              if (!m.content) {
-                m.role = 'system';
-                m.content = '连接 Agent 服务失败，请确认 agent-server 已在 3002 端口运行。';
+          activeTurn = {
+            onEvent: (evt) => {
+              if (settled) return;
+              lastEventAt = Date.now();
+
+              switch (evt.type) {
+                case 'thinking':
+                  updateAssistant((m) => {
+                    m.thinking!.push({ tool: String(evt.tool), args: String(evt.args) });
+                  });
+                  break;
+                case 'mutation': {
+                  const mut: Mutation = { path: String(evt.path), value: evt.value };
+                  updateAssistant((m) => { m.mutations!.push(mut); });
+                  callbacks?.onMutation?.(mut);
+                  break;
+                }
+                case 'play': {
+                  const play: PlayCommand = {
+                    notes: evt.notes as number[],
+                    velocity: (evt.velocity as number) ?? 100,
+                    duration: (evt.duration as number) ?? 0.5,
+                    mode: evt.mode === 'sequence' ? 'sequence' : 'chord',
+                    interval: typeof evt.interval === 'number' ? evt.interval : undefined,
+                  };
+                  updateAssistant((m) => { m.playCommands!.push(play); });
+                  callbacks?.onPlay?.(play);
+                  break;
+                }
+                case 'text_delta':
+                  updateAssistant((m) => { m.content += String(evt.delta ?? ''); });
+                  break;
+                case 'text':
+                  updateAssistant((m) => { m.content = String(evt.content ?? ''); });
+                  break;
+                case 'usage':
+                  updateAssistant((m) => {
+                    const p = Number(evt.prompt_tokens) || 0;
+                    const c = Number(evt.completion_tokens) || 0;
+                    m.usage = {
+                      prompt: (m.usage?.prompt ?? 0) + p,
+                      completion: (m.usage?.completion ?? 0) + c,
+                    };
+                  });
+                  break;
+                case 'save_preset':
+                  callbacks?.onSavePreset?.({
+                    name: String(evt.name || 'Untitled'),
+                    tags: Array.isArray(evt.tags) ? (evt.tags as string[]) : [],
+                  });
+                  break;
+                case 'undo':
+                  callbacks?.onUndo?.();
+                  break;
+                case 'snapshot':
+                  callbacks?.onSnapshot?.();
+                  break;
+                case 'restore_snapshot':
+                  callbacks?.onRestoreSnapshot?.();
+                  break;
+                case 'error': {
+                  const msg = String(evt.message || '未知错误');
+                  updateAssistant((m) => {
+                    if (!m.content) {
+                      m.role = 'system';
+                      m.content = `Agent 错误：${msg}`;
+                    } else {
+                      m.content += `\n\n⚠️ ${msg}`;
+                    }
+                  });
+                  finish();
+                  break;
+                }
+                case 'cancelled':
+                  updateAssistant((m) => { m.cancelled = true; });
+                  finish();
+                  break;
+                case 'done':
+                  finish();
+                  break;
+                // 'pong' and unknown types are ignored
               }
-            });
-            finish();
+            },
+            onDisconnect: () => {
+              if (settled) return;
+              updateAssistant((m) => {
+                m.role = 'system';
+                m.content =
+                  (m.content ? m.content + '\n\n' : '') +
+                  '⚠️ 与 Agent 服务的连接中断，请重试。';
+              });
+              finish();
+            },
           };
 
-          ws.onclose = () => finish();
+          ensureSocket();
+          sendPayload({
+            type: 'chat',
+            message,
+            history,
+            synthState,
+            // Omit provider when unset — the backend default applies.
+            ...(get().provider ? { provider: get().provider } : {}),
+          });
         });
+      },
+
+      cancelStream: () => {
+        if (socket && socket.readyState === WebSocket.OPEN && activeTurn) {
+          socket.send(JSON.stringify({ type: 'cancel' }));
+        }
       },
     })),
     {
