@@ -1,0 +1,1 @@
+{"root":["./src/index.ts","./src/routes/auth.ts","./src/routes/presets.ts","./src/routes/projects.ts","./src/ws/handler.ts"],"errors":true,"version":"6.0.3"}

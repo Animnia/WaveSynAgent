@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { authenticate } from './auth.js';
 
 const prisma = new PrismaClient();
@@ -58,7 +58,13 @@ export default async function presetRoutes(app: FastifyInstance) {
     }
 
     const preset = await prisma.preset.create({
-      data: { userId, name, tags: tags ?? [], isPublic: isPublic ?? false, synthState },
+      data: {
+        userId,
+        name,
+        tags: tags ?? [],
+        isPublic: isPublic ?? false,
+        synthState: synthState as Prisma.InputJsonValue,
+      },
     });
     return reply.status(201).send({ preset });
   });
@@ -72,9 +78,17 @@ export default async function presetRoutes(app: FastifyInstance) {
       if (!preset || preset.userId !== userId) {
         return reply.status(404).send({ error: 'Preset not found' });
       }
+      const { name, tags, isPublic, synthState } = request.body;
       const updated = await prisma.preset.update({
         where: { id: request.params.id },
-        data: request.body,
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(tags !== undefined ? { tags } : {}),
+          ...(isPublic !== undefined ? { isPublic } : {}),
+          ...(synthState !== undefined
+            ? { synthState: synthState as Prisma.InputJsonValue }
+            : {}),
+        },
       });
       return { preset: updated };
     },

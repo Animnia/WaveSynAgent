@@ -24,7 +24,7 @@ export default async function wsRoutes(app: FastifyInstance) {
 
     app.log.info(`WS client connected: ${clientId}`);
 
-    socket.on('message', (raw) => {
+    socket.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(raw.toString());
 

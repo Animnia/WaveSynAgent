@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { authenticate } from './auth.js';
 
 const prisma = new PrismaClient();
@@ -39,7 +39,12 @@ export default async function projectRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'name and synthState are required' });
     }
     const project = await prisma.project.create({
-      data: { userId, name, synthState, sequencerState: sequencerState ?? null },
+      data: {
+        userId,
+        name,
+        synthState: synthState as Prisma.InputJsonValue,
+        sequencerState: (sequencerState ?? undefined) as Prisma.InputJsonValue | undefined,
+      },
     });
     return reply.status(201).send({ project });
   });
@@ -52,9 +57,18 @@ export default async function projectRoutes(app: FastifyInstance) {
       if (!project || project.userId !== userId) {
         return reply.status(404).send({ error: 'Project not found' });
       }
+      const { name, synthState, sequencerState } = request.body;
       const updated = await prisma.project.update({
         where: { id: request.params.id },
-        data: request.body,
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(synthState !== undefined
+            ? { synthState: synthState as Prisma.InputJsonValue }
+            : {}),
+          ...(sequencerState !== undefined
+            ? { sequencerState: sequencerState as Prisma.InputJsonValue }
+            : {}),
+        },
       });
       return { project: updated };
     },
