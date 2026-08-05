@@ -71,10 +71,22 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "index": {"type": "integer", "description": "Oscillator index: 0, 1, or 2", "enum": [0, 1, 2]},
                     "enabled": {"type": "boolean"},
-                    "type": {"type": "string", "enum": ["sine", "triangle", "sawtooth", "square"]},
+                    "type": {"type": "string", "enum": ["sine", "triangle", "sawtooth", "square", "custom"]},
+                    "wavetable": {
+                        "type": "string",
+                        "enum": ["morph", "formant", "digital", "soft"],
+                        "description": "Wavetable for type='custom': morph=basic shapes blend, formant=vocal, digital=harsh/metallic, soft=mellow",
+                    },
+                    "wavetablePosition": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "description": "Morph position through the wavetable frames (0=first frame, 1=last)",
+                    },
                     "volume": {"type": "number", "minimum": 0, "maximum": 1},
                     "semitone": {"type": "integer", "minimum": -24, "maximum": 24},
                     "fine": {"type": "integer", "minimum": -100, "maximum": 100},
+                    "detune": {"type": "integer", "minimum": -1200, "maximum": 1200},
                     "pan": {"type": "number", "minimum": -1, "maximum": 1},
                     "unison": {"type": "integer", "minimum": 1, "maximum": 8},
                     "unisonSpread": {"type": "number", "minimum": 0, "maximum": 100},

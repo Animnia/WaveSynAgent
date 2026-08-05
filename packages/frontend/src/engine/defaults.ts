@@ -8,6 +8,7 @@ export function createDefaultSynthState(): SynthState {
         id: 'osc1',
         enabled: true,
         type: 'sawtooth',
+        wavetable: 'morph',
         wavetablePosition: 0,
         detune: 0,
         semitone: 0,
@@ -21,6 +22,7 @@ export function createDefaultSynthState(): SynthState {
         id: 'osc2',
         enabled: false,
         type: 'square',
+        wavetable: 'morph',
         wavetablePosition: 0,
         detune: 0,
         semitone: 0,
@@ -34,6 +36,7 @@ export function createDefaultSynthState(): SynthState {
         id: 'osc3',
         enabled: false,
         type: 'sine',
+        wavetable: 'morph',
         wavetablePosition: 0,
         detune: 0,
         semitone: -12,
@@ -118,4 +121,45 @@ export function createDefaultSynthState(): SynthState {
       bpm: 120,
     },
   };
+}
+
+/**
+ * Merge a (possibly partial / legacy) stored state over the defaults.
+ * Presets saved before new fields existed (e.g. `wavetable`) stay loadable.
+ */
+export function normalizeSynthState(input: unknown): SynthState {
+  const defaults = createDefaultSynthState();
+  if (!input || typeof input !== 'object') return defaults;
+  const s = input as Partial<SynthState>;
+
+  const section = <K extends keyof SynthState>(key: K): SynthState[K] => ({
+    ...(defaults[key] as object),
+    ...((s[key] ?? {}) as object),
+  }) as SynthState[K];
+
+  const normalized: SynthState = {
+    ...defaults,
+    oscillators: defaults.oscillators.map((def, i) => ({
+      ...def,
+      ...((s.oscillators?.[i] ?? {}) as Partial<typeof def>),
+    })) as SynthState['oscillators'],
+    filter: section('filter'),
+    ampEnvelope: section('ampEnvelope'),
+    filterEnvelope: section('filterEnvelope'),
+    lfo1: section('lfo1'),
+    lfo2: section('lfo2'),
+    effects: Object.fromEntries(
+      Object.entries(defaults.effects).map(([fxId, defFx]) => [
+        fxId,
+        { ...defFx, ...((s.effects?.[fxId as keyof typeof s.effects] ?? {}) as object) },
+      ]),
+    ) as SynthState['effects'],
+    effectChain:
+      Array.isArray(s.effectChain) && s.effectChain.length === DEFAULT_EFFECT_CHAIN.length
+        ? s.effectChain
+        : [...DEFAULT_EFFECT_CHAIN],
+    modulation: Array.isArray(s.modulation) ? s.modulation : [],
+    master: section('master'),
+  };
+  return normalized;
 }

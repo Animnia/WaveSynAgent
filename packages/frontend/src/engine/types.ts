@@ -1,11 +1,16 @@
 // ===== Oscillator Types =====
 export type BasicWaveform = 'sine' | 'square' | 'sawtooth' | 'triangle';
 export type WaveformType = BasicWaveform | 'custom';
+/** Built-in wavetable identifiers (mirrors wavetables.ts). */
+export type WavetableId = 'morph' | 'formant' | 'digital' | 'soft';
 
 export interface OscillatorState {
   id: string;
   enabled: boolean;
+  /** 'custom' = wavetable mode (uses `wavetable` + `wavetablePosition`). */
   type: WaveformType;
+  /** Which built-in wavetable to morph through (custom mode). */
+  wavetable: WavetableId;
   /** Wavetable morph position 0-1 (only for custom type) */
   wavetablePosition: number;
   /** Detune in cents (-1200 to 1200) */

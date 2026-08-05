@@ -1,12 +1,14 @@
 import { useSynthStore } from '@/stores/synthStore';
 import Knob from './Knob';
-import type { WaveformType } from '@/engine/types';
+import type { WaveformType, WavetableId } from '@/engine/types';
+import { WAVETABLES, WAVETABLE_IDS } from '@/engine/wavetables';
 
 const WAVEFORMS: { type: WaveformType; label: string; icon: string }[] = [
   { type: 'sine', label: 'Sine', icon: '∿' },
   { type: 'triangle', label: 'Tri', icon: '△' },
   { type: 'sawtooth', label: 'Saw', icon: '⊿' },
   { type: 'square', label: 'Sq', icon: '⊓' },
+  { type: 'custom', label: 'WT', icon: '▨' },
 ];
 
 interface OscillatorPanelProps {
@@ -57,6 +59,35 @@ export default function OscillatorPanel({ index }: OscillatorPanelProps) {
           </button>
         ))}
       </div>
+
+      {/* Wavetable controls (custom mode) */}
+      {osc.type === 'custom' && (
+        <div className="mb-3 rounded border border-border-default bg-bg-tertiary/50 p-2">
+          <select
+            value={osc.wavetable}
+            onChange={(e) => update(index, { wavetable: e.target.value as WavetableId })}
+            className="w-full bg-bg-tertiary border border-border-default px-2 py-1 text-xs text-text-secondary outline-none focus:border-border-active rounded mb-2"
+          >
+            {WAVETABLE_IDS.map((id) => (
+              <option key={id} value={id}>
+                {WAVETABLES[id].name}
+              </option>
+            ))}
+          </select>
+          <div className="flex justify-center">
+            <Knob
+              label="WT Pos"
+              value={osc.wavetablePosition}
+              min={0}
+              max={1}
+              step={0.01}
+              size={48}
+              color="var(--color-accent-cyan)"
+              onChange={(v) => update(index, { wavetablePosition: v })}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Knobs */}
       <div className="grid grid-cols-3 gap-2">

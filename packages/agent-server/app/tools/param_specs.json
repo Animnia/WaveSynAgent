@@ -15,8 +15,27 @@
         "sine",
         "triangle",
         "sawtooth",
-        "square"
+        "square",
+        "custom"
       ]
+    },
+    {
+      "path": "oscillators.*.wavetable",
+      "type": "enum",
+      "label": "OSC wavetable (custom mode)",
+      "values": [
+        "morph",
+        "formant",
+        "digital",
+        "soft"
+      ]
+    },
+    {
+      "path": "oscillators.*.wavetablePosition",
+      "type": "number",
+      "label": "OSC wavetable morph position",
+      "min": 0,
+      "max": 1
     },
     {
       "path": "oscillators.*.volume",

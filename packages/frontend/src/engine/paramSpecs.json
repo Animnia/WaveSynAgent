@@ -3,7 +3,9 @@
   "version": 1,
   "params": [
     { "path": "oscillators.*.enabled",        "type": "boolean", "label": "OSC enabled" },
-    { "path": "oscillators.*.type",           "type": "enum",    "label": "OSC waveform", "values": ["sine", "triangle", "sawtooth", "square"] },
+    { "path": "oscillators.*.type",           "type": "enum",    "label": "OSC waveform", "values": ["sine", "triangle", "sawtooth", "square", "custom"] },
+    { "path": "oscillators.*.wavetable",      "type": "enum",    "label": "OSC wavetable (custom mode)", "values": ["morph", "formant", "digital", "soft"] },
+    { "path": "oscillators.*.wavetablePosition", "type": "number", "label": "OSC wavetable morph position", "min": 0, "max": 1 },
     { "path": "oscillators.*.volume",         "type": "number",  "label": "OSC volume",        "min": 0,     "max": 1 },
     { "path": "oscillators.*.semitone",       "type": "integer", "label": "OSC semitone",      "min": -24,   "max": 24 },
     { "path": "oscillators.*.fine",           "type": "integer", "label": "OSC fine (cents)",  "min": -100,  "max": 100 },

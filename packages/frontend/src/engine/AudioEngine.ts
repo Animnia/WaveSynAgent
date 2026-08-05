@@ -9,6 +9,7 @@ import type {
   SequencerNote,
 } from './types';
 import { midiToFrequency, DEFAULT_EFFECT_CHAIN } from './types';
+import { WAVETABLES, framePair } from './wavetables';
 
 /**
  * Maps resonance 0-1 to BiquadFilter Q value.
@@ -22,13 +23,35 @@ function clamp(v: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, v));
 }
 
+/**
+ * One audible oscillator unit: a single oscillator for basic waveforms, or
+ * a frame A/B pair crossfading for wavetable (custom) mode.
+ */
+interface VoiceUnit {
+  oscs: Tone.Oscillator[];
+  panner: Tone.Panner;
+  /** Which synth oscillator slot (0-2) this unit belongs to. */
+  oscIndex: number;
+  /** Current morph frame pair (wavetable mode; -1 = n/a for basic types). */
+  frameA: number;
+  frameB: number;
+}
+
 interface Voice {
-  oscillators: Tone.Oscillator[];
-  /** One panner per oscillator (enables per-osc pan + unison stereo spread). */
-  panners: Tone.Panner[];
+  units: VoiceUnit[];
   gain: Tone.Gain;
   ampEnvelope: Tone.AmplitudeEnvelope;
   noteFrequency: number;
+}
+
+/** Equal-power crossfade gains for the wavetable morph pair. */
+function morphGains(blend: number): [number, number] {
+  return [Math.cos((blend * Math.PI) / 2), Math.sin((blend * Math.PI) / 2)];
+}
+
+/** dB conversion that never returns -Infinity (breaks exponential ramps). */
+function toDbSafe(linear: number): number {
+  return 20 * Math.log10(Math.max(linear, 1e-4));
 }
 
 type PerVoiceTarget = 'detune' | 'pan';
@@ -497,18 +520,22 @@ export class AudioEngine {
 
   private connectLfoToVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
     if (target === 'detune') {
-      for (const osc of voice.oscillators) lfo.connect(osc.detune);
+      for (const unit of voice.units) {
+        for (const osc of unit.oscs) lfo.connect(osc.detune);
+      }
     } else {
-      for (const panner of voice.panners) lfo.connect(panner.pan);
+      for (const unit of voice.units) lfo.connect(unit.panner.pan);
     }
   }
 
   private disconnectLfoFromVoice(lfo: Tone.LFO, target: PerVoiceTarget, voice: Voice): void {
     try {
       if (target === 'detune') {
-        for (const osc of voice.oscillators) lfo.disconnect(osc.detune);
+        for (const unit of voice.units) {
+          for (const osc of unit.oscs) lfo.disconnect(osc.detune);
+        }
       } else {
-        for (const panner of voice.panners) lfo.disconnect(panner.pan);
+        for (const unit of voice.units) lfo.disconnect(unit.panner.pan);
       }
     } catch {
       // Already disconnected / disposed — safe to ignore.
@@ -617,28 +644,62 @@ export class AudioEngine {
         (n, o) => n + (o.enabled ? Math.max(1, o.unison) : 0),
         0,
       );
-      if (expected !== voice.oscillators.length) continue;
+      if (expected !== voice.units.length) continue;
 
+      let mismatch = false;
       let i = 0;
-      for (const oscState of state.oscillators) {
+      for (let oscIdx = 0; oscIdx < state.oscillators.length && !mismatch; oscIdx++) {
+        const oscState = state.oscillators[oscIdx];
         if (!oscState.enabled) continue;
         const count = Math.max(1, oscState.unison);
+        const isCustom = oscState.type === 'custom';
+        const table = isCustom ? (WAVETABLES[oscState.wavetable] ?? WAVETABLES.morph) : null;
         const freq =
           voice.noteFrequency *
           Math.pow(2, oscState.semitone / 12) *
           Math.pow(2, oscState.fine / 1200);
         const perVoiceVolume = oscState.volume / Math.sqrt(count);
+        const pair = table ? framePair(table, oscState.wavetablePosition) : null;
+        const gains = pair ? morphGains(pair.blend) : null;
+
         for (let u = 0; u < count; u++, i++) {
+          const unit = voice.units[i];
+          if (!unit || unit.oscIndex !== oscIdx || unit.oscs.length !== (isCustom ? 2 : 1)) {
+            mismatch = true; // structure changed — keep birth timbre, next note gets it
+            break;
+          }
           const centered = u - (count - 1) / 2;
           const detuneOffset = count > 1 ? centered * (oscState.unisonSpread / count) : 0;
           const panOffset = count > 1 ? centered * (0.8 / count) : 0;
-          const osc = voice.oscillators[i];
-          const panner = voice.panners[i];
-          osc.frequency.setTargetAtTime(freq, now, 0.02);
-          osc.detune.setTargetAtTime(oscState.detune + detuneOffset, now, 0.02);
-          // gainToDb(0) = -Infinity breaks exponential ramps — clamp.
-          osc.volume.setTargetAtTime(Math.max(-60, Tone.gainToDb(perVoiceVolume)), now, 0.03);
-          panner.pan.setTargetAtTime(clamp(oscState.pan + panOffset, -1, 1), now, 0.03);
+
+          if (table && pair && gains) {
+            const [oscA, oscB] = unit.oscs;
+            // Cross a frame boundary → retable the morph pair (cached waves).
+            if (unit.frameA !== pair.frameA) {
+              oscA.partials = table.frames[pair.frameA];
+              unit.frameA = pair.frameA;
+            }
+            if (unit.frameB !== pair.frameB) {
+              oscB.partials = table.frames[pair.frameB];
+              unit.frameB = pair.frameB;
+            }
+            oscA.frequency.setTargetAtTime(freq, now, 0.02);
+            oscB.frequency.setTargetAtTime(freq, now, 0.02);
+            oscA.detune.setTargetAtTime(oscState.detune + detuneOffset, now, 0.02);
+            oscB.detune.setTargetAtTime(oscState.detune + detuneOffset, now, 0.02);
+            oscA.volume.setTargetAtTime(toDbSafe(perVoiceVolume * gains[0]), now, 0.03);
+            oscB.volume.setTargetAtTime(toDbSafe(perVoiceVolume * gains[1]), now, 0.03);
+          } else {
+            const osc = unit.oscs[0];
+            osc.frequency.setTargetAtTime(freq, now, 0.02);
+            osc.detune.setTargetAtTime(oscState.detune + detuneOffset, now, 0.02);
+            osc.volume.setTargetAtTime(
+              Math.max(-60, Tone.gainToDb(perVoiceVolume)),
+              now,
+              0.03,
+            );
+          }
+          unit.panner.pan.setTargetAtTime(clamp(oscState.pan + panOffset, -1, 1), now, 0.03);
         }
       }
     }
@@ -743,11 +804,13 @@ export class AudioEngine {
     for (const { lfo, perVoice } of this.activeLfos.values()) {
       if (perVoice) this.disconnectLfoFromVoice(lfo, perVoice, voice);
     }
-    voice.oscillators.forEach((osc) => {
-      try { osc.stop(); } catch { /* noop */ }
-      osc.dispose();
-    });
-    voice.panners.forEach((p) => p.dispose());
+    for (const unit of voice.units) {
+      unit.oscs.forEach((osc) => {
+        try { osc.stop(); } catch { /* noop */ }
+        osc.dispose();
+      });
+      unit.panner.dispose();
+    }
     voice.gain.dispose();
     voice.ampEnvelope.dispose();
   }
@@ -769,27 +832,25 @@ export class AudioEngine {
     });
     const gain = new Tone.Gain(velocityGain);
 
-    const oscillators: Tone.Oscillator[] = [];
-    const panners: Tone.Panner[] = [];
-
-    for (const oscState of state.oscillators) {
-      if (!oscState.enabled) continue;
-      const { oscs, pans } = this.createOscillatorVoices(oscState, frequency);
-      oscillators.push(...oscs);
-      panners.push(...pans);
-    }
-
-    // Route: osc → panner → ampEnvelope → velocity gain → filter (→ FX chain)
-    oscillators.forEach((osc, i) => {
-      osc.connect(panners[i]);
-      panners[i].connect(ampEnv);
+    const units: VoiceUnit[] = [];
+    state.oscillators.forEach((oscState, oscIndex) => {
+      if (!oscState.enabled) return;
+      units.push(...this.createOscillatorVoices(oscState, oscIndex, frequency));
     });
+
+    // Route: unit oscs → unit panner → ampEnvelope → velocity gain → filter (→ FX)
+    for (const unit of units) {
+      for (const osc of unit.oscs) osc.connect(unit.panner);
+      unit.panner.connect(ampEnv);
+    }
     ampEnv.connect(gain);
     gain.connect(this.filter);
 
-    oscillators.forEach((osc) => osc.start());
+    for (const unit of units) {
+      for (const osc of unit.oscs) osc.start();
+    }
 
-    const voice: Voice = { oscillators, panners, gain, ampEnvelope: ampEnv, noteFrequency: frequency };
+    const voice: Voice = { units, gain, ampEnvelope: ampEnv, noteFrequency: frequency };
 
     // Attach live per-voice LFOs (pitch/pan) to the new voice.
     for (const { lfo, perVoice } of this.activeLfos.values()) {
@@ -801,37 +862,50 @@ export class AudioEngine {
 
   private createOscillatorVoices(
     oscState: OscillatorState,
+    oscIndex: number,
     baseFreq: number,
-  ): { oscs: Tone.Oscillator[]; pans: Tone.Panner[] } {
-    const semitoneRatio = Math.pow(2, oscState.semitone / 12);
-    const fineRatio = Math.pow(2, oscState.fine / 1200);
-    const freq = baseFreq * semitoneRatio * fineRatio;
-
-    const type = oscState.type === 'custom' ? 'sawtooth' : oscState.type;
+  ): VoiceUnit[] {
+    const freq =
+      baseFreq *
+      Math.pow(2, oscState.semitone / 12) *
+      Math.pow(2, oscState.fine / 1200);
     const count = Math.max(1, oscState.unison);
     const perVoiceVolume = oscState.volume / Math.sqrt(count);
+    const isCustom = oscState.type === 'custom';
+    const table = isCustom ? (WAVETABLES[oscState.wavetable] ?? WAVETABLES.morph) : null;
 
-    const oscs: Tone.Oscillator[] = [];
-    const pans: Tone.Panner[] = [];
-
+    const units: VoiceUnit[] = [];
     for (let i = 0; i < count; i++) {
       // Unison detune spread (cents) and stereo spread (±0.8 max) are both
       // centered on the oscillator's own detune/pan settings.
       const centered = i - (count - 1) / 2;
       const detuneOffset = count > 1 ? centered * (oscState.unisonSpread / count) : 0;
       const panOffset = count > 1 ? centered * (0.8 / count) : 0;
-
-      // 2-arg constructor: the options-object overload is a discriminated
-      // union on `type` that plain ToneOscillatorType doesn't satisfy.
-      const osc = new Tone.Oscillator(freq, type as Tone.ToneOscillatorType);
-      osc.volume.value = Tone.gainToDb(perVoiceVolume);
-      osc.detune.value = oscState.detune + detuneOffset;
-
       const panner = new Tone.Panner(clamp(oscState.pan + panOffset, -1, 1));
-      oscs.push(osc);
-      pans.push(panner);
+
+      if (table) {
+        // Wavetable morph: frame A/B pair with equal-power crossfade.
+        const { frameA, frameB, blend } = framePair(table, oscState.wavetablePosition);
+        const [gA, gB] = morphGains(blend);
+        const oscA = new Tone.Oscillator(freq, 'sawtooth');
+        oscA.partials = table.frames[frameA];
+        oscA.detune.value = oscState.detune + detuneOffset;
+        oscA.volume.value = toDbSafe(perVoiceVolume * gA);
+        const oscB = new Tone.Oscillator(freq, 'sawtooth');
+        oscB.partials = table.frames[frameB];
+        oscB.detune.value = oscState.detune + detuneOffset;
+        oscB.volume.value = toDbSafe(perVoiceVolume * gB);
+        units.push({ oscs: [oscA, oscB], panner, oscIndex, frameA, frameB });
+      } else {
+        // 2-arg constructor: the options-object overload is a discriminated
+        // union on `type` that plain ToneOscillatorType doesn't satisfy.
+        const osc = new Tone.Oscillator(freq, oscState.type as Tone.ToneOscillatorType);
+        osc.volume.value = Tone.gainToDb(perVoiceVolume);
+        osc.detune.value = oscState.detune + detuneOffset;
+        units.push({ oscs: [osc], panner, oscIndex, frameA: -1, frameB: -1 });
+      }
     }
-    return { oscs, pans };
+    return units;
   }
 
   // ===== Step Sequencer =====

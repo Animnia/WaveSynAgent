@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { SynthState, OscillatorState, FilterState, EnvelopeState, LFOState, EffectsState, MasterState, EffectId, ModRoute } from '@/engine/types';
-import { createDefaultSynthState } from '@/engine/defaults';
+import { createDefaultSynthState, normalizeSynthState } from '@/engine/defaults';
 import { getAudioEngine } from '@/engine/AudioEngine';
 import { validateMutation, setByPath } from '@/engine/paramRegistry';
 
@@ -93,7 +93,9 @@ export const useSynthStore = create<SynthStore>()(
       setSynthState: (newState) => {
         recordHistory(true); // discrete wholesale change (e.g. preset load)
         set((draft) => {
-          draft.state = newState;
+          // Merge over defaults — presets saved before new fields existed
+          // (e.g. wavetable) stay loadable.
+          draft.state = normalizeSynthState(newState);
         });
         syncEngine();
       },
