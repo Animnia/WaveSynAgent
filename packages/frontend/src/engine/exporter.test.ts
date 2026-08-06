@@ -56,6 +56,6 @@ describe('audioBufferToWav', () => {
 
 describe('exportFilename', () => {
   it('produces a timestamped wav name', () => {
-    expect(exportFilename()).toMatch(/^wavesyn-\d{8}-\d{6}\.wav$/);
+    expect(exportFilename()).toMatch(/^wavesyn-mix-\d{8}-\d{6}\.wav$/);
   });
 });

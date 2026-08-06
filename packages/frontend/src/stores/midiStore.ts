@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { getAudioEngine } from '@/engine/registry';
 import { isMidiSupported, parseMidiMessage, CC_SUSTAIN, CC_MODWHEEL } from '@/engine/midi';
 import { useSynthStore } from './synthStore';
 

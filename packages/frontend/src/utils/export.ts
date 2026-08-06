@@ -1,14 +1,14 @@
 /**
  * Export orchestration shared by the header button and the agent tool.
- * Reads the live stores, renders offline, and triggers the download.
+ * Reads the track store, renders the full mix offline, triggers the download.
  */
-import { useSynthStore } from '@/stores/synthStore';
-import { useSequencerStore } from '@/stores/sequencerStore';
+import { useTracksStore } from '@/stores/tracksStore';
 import {
-  renderPatchToWav,
+  renderMixToWav,
   downloadBlob,
   exportFilename,
   type ExportRequest,
+  type ExportTrack,
 } from '@/engine/exporter';
 
 let exporting = false;
@@ -21,10 +21,12 @@ export async function exportCurrentPatch(request: ExportRequest = {}): Promise<v
   if (exporting) return;
   exporting = true;
   try {
-    const state = useSynthStore.getState().state;
-    const seq = useSequencerStore.getState();
-    const pattern = seq.pattern.notes.length > 0 ? seq.pattern : null;
-    const blob = await renderPatchToWav(state, pattern, request);
+    const tracks: ExportTrack[] = useTracksStore.getState().tracks.map((t) => ({
+      synthState: t.synthState,
+      pattern: t.pattern,
+      mixer: t.mixer,
+    }));
+    const blob = await renderMixToWav(tracks, request);
     downloadBlob(blob, exportFilename());
   } finally {
     exporting = false;

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { getAudioEngine } from '@/engine/registry';
 
 interface OscilloscopeProps {
   width?: number;

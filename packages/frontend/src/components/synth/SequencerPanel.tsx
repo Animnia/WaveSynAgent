@@ -1,22 +1,24 @@
 import { Fragment } from 'react';
-import { useSequencerStore } from '@/stores/sequencerStore';
+import { useTracksStore, useActiveTrack } from '@/stores/tracksStore';
 import { midiToNoteName } from '@/engine/types';
 
 /**
- * 16/32-step sequencer grid. Rows form one chromatic octave (top = highest),
- * columns are sixteenth-note steps. Click a cell to toggle a note.
- * The pattern always plays through the live patch.
+ * 16/32-step sequencer grid for the ACTIVE track (each track owns its
+ * pattern). Rows form one chromatic octave (top = highest); columns are
+ * sixteenth-note steps. Click a cell to toggle a note.
  */
 export default function SequencerPanel() {
-  const pattern = useSequencerStore((s) => s.pattern);
-  const playing = useSequencerStore((s) => s.playing);
-  const currentStep = useSequencerStore((s) => s.currentStep);
-  const baseNote = useSequencerStore((s) => s.baseNote);
-  const toggle = useSequencerStore((s) => s.toggle);
-  const toggleCell = useSequencerStore((s) => s.toggleCell);
-  const clearPattern = useSequencerStore((s) => s.clearPattern);
-  const setSteps = useSequencerStore((s) => s.setSteps);
-  const shiftOctave = useSequencerStore((s) => s.shiftOctave);
+  const track = useActiveTrack();
+  const currentStep = useTracksStore((s) => s.currentStep);
+  const baseNote = useTracksStore((s) => s.seqBaseNote);
+  const toggleTrack = useTracksStore((s) => s.toggleTrack);
+  const toggleCell = useTracksStore((s) => s.toggleSeqCell);
+  const clearPattern = useTracksStore((s) => s.clearSeqPattern);
+  const setSteps = useTracksStore((s) => s.setSeqSteps);
+  const shiftOctave = useTracksStore((s) => s.shiftSeqOctave);
+
+  if (!track) return null;
+  const { pattern, playing, id: trackId } = track;
 
   // Top row = highest note of the octave
   const rows = Array.from({ length: 12 }, (_, i) => baseNote + 11 - i);
@@ -30,7 +32,7 @@ export default function SequencerPanel() {
       {/* Controls */}
       <div className="flex items-center gap-2 mb-2">
         <button
-          onClick={() => void toggle()}
+          onClick={() => void toggleTrack(trackId)}
           className={`px-3 py-1 text-xs rounded border transition-colors ${
             playing
               ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
@@ -44,7 +46,7 @@ export default function SequencerPanel() {
           {([16, 32] as const).map((n) => (
             <button
               key={n}
-              onClick={() => setSteps(n)}
+              onClick={() => setSteps(trackId, n)}
               className={`px-2 py-1 text-[10px] transition-colors ${
                 steps === n
                   ? 'bg-accent-cyan/20 text-accent-cyan'
@@ -77,14 +79,14 @@ export default function SequencerPanel() {
         </div>
 
         <button
-          onClick={clearPattern}
+          onClick={() => clearPattern(trackId)}
           className="px-2 py-1 text-[10px] bg-bg-tertiary text-text-muted border border-border-default rounded hover:text-accent-red transition-colors"
         >
           Clear
         </button>
 
         <span className="text-[10px] text-text-muted ml-auto">
-          {pattern.notes.length} notes · plays through current patch
+          <span style={{ color: track.color }}>●</span> {track.name} · {pattern.notes.length} notes
         </span>
       </div>
 
@@ -110,7 +112,7 @@ export default function SequencerPanel() {
                 return (
                   <button
                     key={`${note}-${step}`}
-                    onClick={() => toggleCell(note, step)}
+                    onClick={() => toggleCell(trackId, note, step)}
                     className={`h-4 rounded-[2px] transition-colors ${
                       active
                         ? isCurrent

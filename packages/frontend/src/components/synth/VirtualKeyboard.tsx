@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useSynthStore } from '@/stores/synthStore';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { getAudioEngine } from '@/engine/registry';
 import { midiToNoteName } from '@/engine/types';
 
 // Computer keyboard mapping — two-row piano layout starting at C4

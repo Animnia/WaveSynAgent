@@ -12,6 +12,8 @@ export interface ThinkingStep {
 export interface Mutation {
   path: string;
   value: unknown;
+  /** Target track index (0-based); undefined = active track. */
+  track?: number;
 }
 
 export interface PlayCommand {
@@ -66,12 +68,22 @@ export interface SequencerPatternPayload {
   steps: number;
   notes: { note: number; start: number; duration: number; velocity: number }[];
   name?: string;
+  /** Target track index (0-based); undefined = active track. */
+  track?: number;
 }
 
 export interface ExportAudioPayload {
   bars?: number;
   duration?: number;
   notes?: number[];
+}
+
+export interface TrackMixerPayload {
+  track?: number;
+  volume?: number;
+  pan?: number;
+  mute?: boolean;
+  solo?: boolean;
 }
 
 interface StreamCallbacks {
@@ -84,8 +96,11 @@ interface StreamCallbacks {
   /** Play + analyze audio, returning features to relay to the agent. */
   onAnalyze?: (req: AnalyzeRequest) => Promise<unknown>;
   onSequencerPattern?: (p: SequencerPatternPayload) => void;
-  onSequencerControl?: (action: 'start' | 'stop') => void;
+  onSequencerControl?: (action: 'start' | 'stop', track?: number) => void;
   onExportAudio?: (p: ExportAudioPayload) => void;
+  onCreateTrack?: (name?: string) => void;
+  onSelectTrack?: (track: number) => void;
+  onTrackMixer?: (p: TrackMixerPayload) => void;
 }
 
 interface AgentActions {
@@ -444,7 +459,11 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                   });
                   break;
                 case 'mutation': {
-                  const mut: Mutation = { path: String(evt.path), value: evt.value };
+                  const mut: Mutation = {
+                    path: String(evt.path),
+                    value: evt.value,
+                    track: typeof evt.track === 'number' ? evt.track : undefined,
+                  };
                   updateAssistant((m) => { m.mutations!.push(mut); });
                   callbacks?.onMutation?.(mut);
                   break;
@@ -499,10 +518,31 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                       ? (evt.notes as SequencerPatternPayload['notes'])
                       : [],
                     name: typeof evt.name === 'string' ? evt.name : undefined,
+                    track: typeof evt.track === 'number' ? evt.track : undefined,
                   });
                   break;
                 case 'sequencer_control':
-                  callbacks?.onSequencerControl?.(evt.action === 'stop' ? 'stop' : 'start');
+                  callbacks?.onSequencerControl?.(
+                    evt.action === 'stop' ? 'stop' : 'start',
+                    typeof evt.track === 'number' ? evt.track : undefined,
+                  );
+                  break;
+                case 'create_track':
+                  callbacks?.onCreateTrack?.(
+                    typeof evt.name === 'string' ? evt.name : undefined,
+                  );
+                  break;
+                case 'select_track':
+                  if (typeof evt.track === 'number') callbacks?.onSelectTrack?.(evt.track);
+                  break;
+                case 'track_mixer':
+                  callbacks?.onTrackMixer?.({
+                    track: typeof evt.track === 'number' ? evt.track : undefined,
+                    volume: typeof evt.volume === 'number' ? evt.volume : undefined,
+                    pan: typeof evt.pan === 'number' ? evt.pan : undefined,
+                    mute: typeof evt.mute === 'boolean' ? evt.mute : undefined,
+                    solo: typeof evt.solo === 'boolean' ? evt.solo : undefined,
+                  });
                   break;
                 case 'export_audio':
                   callbacks?.onExportAudio?.({

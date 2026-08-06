@@ -9,8 +9,8 @@ import {
 import type { AgentMessage, Mutation, PlayCommand } from '@/stores/agentStore';
 import { useSynthStore } from '@/stores/synthStore';
 import { usePresetStore } from '@/stores/presetStore';
-import { useSequencerStore } from '@/stores/sequencerStore';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { useTracksStore } from '@/stores/tracksStore';
+import { getAudioEngine } from '@/engine/registry';
 import { captureAudioFeatures } from '@/engine/audioAnalysis';
 import { exportCurrentPatch } from '@/utils/export';
 import AgentHistoryDrawer from './AgentHistoryDrawer';
@@ -38,7 +38,6 @@ export default function AgentPanel() {
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
   const synthState = useSynthStore((s) => s.state);
-  const applyMutationToStore = useSynthStore((s) => s.applyMutation);
   const noteOn = useSynthStore((s) => s.noteOn);
   const noteOff = useSynthStore((s) => s.noteOff);
 
@@ -57,10 +56,12 @@ export default function AgentPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Registry-driven dispatch: validates + applies any param path, plus the
-  // special effectChain / modulation.* paths — all inside the synth store.
+  // Registry-driven dispatch routed to the target track (default: active).
   const applyMutation = (mut: Mutation) => {
-    applyMutationToStore(mut.path, mut.value);
+    const tracks = useTracksStore.getState();
+    const activeIndex = tracks.tracks.findIndex((t) => t.id === tracks.activeTrackId);
+    const trackIndex = mut.track ?? Math.max(0, activeIndex);
+    tracks.applyMutationToTrack(trackIndex, mut.path, mut.value);
   };
 
   const handlePlay = async (cmd: PlayCommand) => {
@@ -91,15 +92,35 @@ export default function AgentPanel() {
     const msg = input.trim();
     if (!msg || isLoading) return;
     setInput('');
-    // Attach a compact sequencer snapshot so the agent can read/edit the
-    // pattern in context (extra key is ignored by the mutation applier).
-    const seq = useSequencerStore.getState();
+    // Attach track context so the agent sees the full picture: the active
+    // track's state in full, plus a summary of every track.
+    const tracksStore = useTracksStore.getState();
+    const activeTrack = tracksStore.tracks.find(
+      (t) => t.id === tracksStore.activeTrackId,
+    );
+    const activeIndex = tracksStore.tracks.findIndex(
+      (t) => t.id === tracksStore.activeTrackId,
+    );
     const statePayload = Object.assign({}, synthState, {
-      sequencer: {
-        playing: seq.playing,
-        steps: seq.pattern.steps,
-        notes: seq.pattern.notes,
-      },
+      sequencer: activeTrack
+        ? {
+            playing: activeTrack.playing,
+            steps: activeTrack.pattern.steps,
+            notes: activeTrack.pattern.notes,
+          }
+        : undefined,
+      tracks: tracksStore.tracks.map((t, i) => ({
+        index: i,
+        name: t.name,
+        active: i === activeIndex,
+        playing: t.playing,
+        mute: t.mixer.mute,
+        solo: t.mixer.solo,
+        volume: t.mixer.volume,
+        pan: t.mixer.pan,
+        patternNotes: t.pattern.notes.length,
+      })),
+      activeTrack: Math.max(0, activeIndex),
     }) as typeof synthState;
     await streamMessage(msg, statePayload, {
       onMutation: applyMutation,
@@ -131,21 +152,47 @@ export default function AgentPanel() {
         return captureAudioFeatures(getAudioEngine(), duration * 1000);
       },
       onSequencerPattern: (payload) => {
-        const store = useSequencerStore.getState();
-        store.setPatternFromAgent(payload);
-        store.setPanelOpen(true); // let the user see what the agent wrote
+        const tracks = useTracksStore.getState();
+        const idx = tracks.tracks.findIndex((t) => t.id === tracks.activeTrackId);
+        const track = tracks.tracks[payload.track ?? Math.max(0, idx)];
+        if (!track) return;
+        tracks.setSeqPattern(track.id, payload);
+        tracks.setSequencerPanelOpen(true); // let the user see what the agent wrote
       },
-      onSequencerControl: (action) => {
-        const store = useSequencerStore.getState();
+      onSequencerControl: (action, trackIndex) => {
+        const tracks = useTracksStore.getState();
+        const idx = tracks.tracks.findIndex((t) => t.id === tracks.activeTrackId);
+        const track = tracks.tracks[trackIndex ?? Math.max(0, idx)];
+        if (!track) return;
         if (action === 'start') {
-          store.setPanelOpen(true);
-          void store.play();
+          tracks.setSequencerPanelOpen(true);
+          void tracks.playTrack(track.id);
         } else {
-          store.stop();
+          tracks.stopTrack(track.id);
         }
       },
       onExportAudio: (payload) => {
         void exportCurrentPatch(payload);
+      },
+      onCreateTrack: (name) => {
+        useTracksStore.getState().createTrack(name);
+      },
+      onSelectTrack: (trackIndex) => {
+        const tracks = useTracksStore.getState();
+        const track = tracks.tracks[trackIndex];
+        if (track) tracks.selectTrack(track.id);
+      },
+      onTrackMixer: (p) => {
+        const tracks = useTracksStore.getState();
+        const idx = tracks.tracks.findIndex((t) => t.id === tracks.activeTrackId);
+        const track = tracks.tracks[p.track ?? Math.max(0, idx)];
+        if (!track) return;
+        const patch: Record<string, unknown> = {};
+        if (p.volume !== undefined) patch.volume = Math.min(1, Math.max(0, p.volume));
+        if (p.pan !== undefined) patch.pan = Math.min(1, Math.max(-1, p.pan));
+        if (p.mute !== undefined) patch.mute = p.mute;
+        if (p.solo !== undefined) patch.solo = p.solo;
+        tracks.setMixerParams(track.id, patch);
       },
     });
   };

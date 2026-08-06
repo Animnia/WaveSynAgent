@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 import type { SynthState, OscillatorState, FilterState, EnvelopeState, LFOState, EffectsState, MasterState, EffectId, ModRoute } from '@/engine/types';
 import { createDefaultSynthState, normalizeSynthState } from '@/engine/defaults';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { getTrackEngine } from '@/engine/registry';
 import { validateMutation, setByPath } from '@/engine/paramRegistry';
 
 interface SynthStore {
+  /** Which track this store is currently bound to (multi-track architecture). */
+  boundTrackId: string;
   state: SynthState;
   isPlaying: boolean;
   activeNotes: Set<number>;
@@ -15,6 +17,9 @@ interface SynthStore {
   future: SynthState[];
   /** Restore point saved by the AI agent (snapshot_patch tool). */
   agentSnapshot: SynthState | null;
+
+  /** Bind the store to a track slot (called by tracksStore on selection). */
+  bindTrack: (trackId: string, state: SynthState, past: SynthState[], future: SynthState[]) => void;
 
   // Actions
   setSynthState: (state: SynthState) => void;
@@ -59,7 +64,7 @@ let lastEditAt = 0;
 export const useSynthStore = create<SynthStore>()(
   immer((set, get) => {
     const syncEngine = () => {
-      const engine = getAudioEngine();
+      const engine = getTrackEngine(get().boundTrackId);
       engine.applyState(get().state);
     };
 
@@ -83,12 +88,25 @@ export const useSynthStore = create<SynthStore>()(
     };
 
     return {
+      boundTrackId: 'track-1',
       state: createDefaultSynthState(),
       isPlaying: false,
       activeNotes: new Set<number>(),
       past: [],
       future: [],
       agentSnapshot: null,
+
+      bindTrack: (trackId, state, past, future) => {
+        lastEditAt = 0; // never coalesce across a track switch
+        set((draft) => {
+          draft.boundTrackId = trackId;
+          draft.state = state;
+          draft.past = past;
+          draft.future = future;
+          draft.activeNotes = new Set();
+        });
+        syncEngine();
+      },
 
       setSynthState: (newState) => {
         recordHistory(true); // discrete wholesale change (e.g. preset load)
@@ -300,7 +318,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       noteOn: (midiNote, velocity = 100) => {
-        const engine = getAudioEngine();
+        const engine = getTrackEngine(get().boundTrackId);
         engine.noteOn(midiNote, velocity);
         set((draft) => {
           draft.activeNotes.add(midiNote);
@@ -308,7 +326,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       noteOff: (midiNote) => {
-        const engine = getAudioEngine();
+        const engine = getTrackEngine(get().boundTrackId);
         engine.noteOff(midiNote);
         set((draft) => {
           draft.activeNotes.delete(midiNote);
@@ -316,7 +334,7 @@ export const useSynthStore = create<SynthStore>()(
       },
 
       panic: () => {
-        const engine = getAudioEngine();
+        const engine = getTrackEngine(get().boundTrackId);
         engine.panic();
         set((draft) => {
           draft.activeNotes.clear();

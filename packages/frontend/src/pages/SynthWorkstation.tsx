@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSynthStore } from '@/stores/synthStore';
-import { getAudioEngine } from '@/engine/AudioEngine';
+import { getAudioEngine } from '@/engine/registry';
 import OscillatorPanel from '@/components/synth/OscillatorPanel';
 import FilterPanel from '@/components/synth/FilterPanel';
 import EnvelopePanel from '@/components/synth/EnvelopePanel';
@@ -16,7 +16,8 @@ import { useAgentStore } from '@/stores/agentStore';
 import PresetBrowser from '@/components/presets/PresetBrowser';
 import { usePresetStore } from '@/stores/presetStore';
 import SequencerPanel from '@/components/synth/SequencerPanel';
-import { useSequencerStore } from '@/stores/sequencerStore';
+import TrackBar from '@/components/synth/TrackBar';
+import { useTracksStore } from '@/stores/tracksStore';
 import { useMidiStore } from '@/stores/midiStore';
 import { exportCurrentPatch } from '@/utils/export';
 
@@ -29,9 +30,11 @@ export default function SynthWorkstation() {
   const redo = useSynthStore((s) => s.redo);
   const canUndo = useSynthStore((s) => s.past.length > 0);
   const canRedo = useSynthStore((s) => s.future.length > 0);
-  const sequencerOpen = useSequencerStore((s) => s.panelOpen);
-  const sequencerPlaying = useSequencerStore((s) => s.playing);
-  const toggleSequencer = useSequencerStore((s) => s.togglePanel);
+  const sequencerOpen = useTracksStore((s) => s.sequencerPanelOpen);
+  const sequencerPlaying = useTracksStore(
+    (s) => s.tracks.find((t) => t.id === s.activeTrackId)?.playing ?? false,
+  );
+  const toggleSequencer = useTracksStore((s) => s.toggleSequencerPanel);
   const midiSupported = useMidiStore((s) => s.supported);
   const midiEnabled = useMidiStore((s) => s.enabled);
   const midiInputs = useMidiStore((s) => s.inputs);
@@ -173,6 +176,9 @@ export default function SynthWorkstation() {
           </button>
         </div>
       </header>
+
+      {/* ===== Track Bar ===== */}
+      <TrackBar />
 
       {/* ===== Main Content ===== */}
       <div className="flex-1 flex overflow-hidden">

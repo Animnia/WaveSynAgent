@@ -1,3 +1,4 @@
-export { AudioEngine, getAudioEngine } from './AudioEngine';
-export { createDefaultSynthState } from './defaults';
+export { AudioEngine } from './AudioEngine';
+export { getAudioEngine, getTrackEngine } from './registry';
+export { createDefaultSynthState, normalizeSynthState } from './defaults';
 export type * from './types';

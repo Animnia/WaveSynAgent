@@ -1,21 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDefaultSynthState } from '@/engine/defaults';
 
-// The engine needs a real AudioContext — replace it with a stub; these tests
-// cover store semantics (mutation dispatch, history), not audio.
-vi.mock('@/engine/AudioEngine', () => ({
-  getAudioEngine: () => ({
-    applyState: vi.fn(),
-    noteOn: vi.fn(),
-    noteOff: vi.fn(),
-    panic: vi.fn(),
-  }),
+// The engine needs a real AudioContext — replace the registry with stubs;
+// these tests cover store semantics (mutation dispatch, history), not audio.
+const engineStub = {
+  applyState: vi.fn(),
+  noteOn: vi.fn(),
+  noteOff: vi.fn(),
+  panic: vi.fn(),
+};
+
+vi.mock('@/engine/registry', () => ({
+  getTrackEngine: () => engineStub,
+  getAudioEngine: () => engineStub,
+  setActiveEngineTrack: vi.fn(),
+  removeTrackEngine: vi.fn(),
 }));
 
 import { useSynthStore } from './synthStore';
 
 function resetStore() {
   useSynthStore.setState({
+    boundTrackId: 'track-1',
     state: createDefaultSynthState(),
     past: [],
     future: [],

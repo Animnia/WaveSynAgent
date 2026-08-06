@@ -90,6 +90,11 @@ function bipolarRoom(base: number, min: number, max: number): number {
  */
 export class AudioEngine {
   private masterGain: Tone.Gain;
+  /**
+   * The engine's outlet — everything this engine produces exits here.
+   * The host (mixer/registry) connects it to a track channel strip.
+   */
+  public readonly output: Tone.Gain;
   private analyserNode: Tone.Waveform;
   private fftAnalyser: Tone.FFT;
 
@@ -137,6 +142,8 @@ export class AudioEngine {
   private seqStepEventId: number | null = null;
   private seqStepCounter = 0;
   private seqSteps = 16;
+  /** Whether THIS engine's pattern is playing (the Transport itself is shared). */
+  private seqPlaying = false;
   /** UI hook: called (via Tone.Draw) with the current step while playing. */
   onStep: ((step: number) => void) | null = null;
 
@@ -191,8 +198,9 @@ export class AudioEngine {
   }
 
   constructor() {
-    // Master output chain: filter → effects → masterGain → analysers → destination
+    // Master output chain: filter → effects → masterGain → output → (host)
     this.masterGain = new Tone.Gain(0.75);
+    this.output = new Tone.Gain(1);
     this.analyserNode = new Tone.Waveform(2048);
     this.fftAnalyser = new Tone.FFT(2048);
 
@@ -254,9 +262,10 @@ export class AudioEngine {
     this.rebuildChain(DEFAULT_EFFECT_CHAIN);
     // Parallel taps off masterGain (not in series) so waveform/fft
     // are independent and either one failing cannot starve the other.
+    // The host routes `output` to a track channel strip → master bus.
     this.masterGain.connect(this.analyserNode);
     this.masterGain.connect(this.fftAnalyser);
-    this.masterGain.toDestination();
+    this.masterGain.connect(this.output);
   }
 
   /**
@@ -295,10 +304,10 @@ export class AudioEngine {
       prev = node;
     }
     prev.connect(this.masterGain);
-    // Re-attach analyser taps + speakers in parallel.
+    // Re-attach analyser taps + output in parallel.
     this.masterGain.connect(this.analyserNode);
     this.masterGain.connect(this.fftAnalyser);
-    this.masterGain.toDestination();
+    this.masterGain.connect(this.output);
 
     this.currentChainOrder = sanitized;
   }
@@ -1092,7 +1101,7 @@ export class AudioEngine {
    * playing, playback resumes seamlessly with the new pattern.
    */
   setSequencerPattern(pattern: SequencerPattern | null): void {
-    const wasPlaying = this.transport.state === 'started';
+    const wasPlaying = this.seqPlaying;
     this.teardownSequencerPart();
     if (!pattern || pattern.notes.length === 0) return;
 
@@ -1119,6 +1128,7 @@ export class AudioEngine {
 
   startSequencer(): void {
     if (!this.seqPart) return;
+    this.seqPlaying = true;
     this.seqStepCounter = 0;
     if (this.seqStepEventId === null) {
       this.seqStepEventId = this.transport.scheduleRepeat((time) => {
@@ -1127,23 +1137,26 @@ export class AudioEngine {
         Tone.getDraw().schedule(() => this.onStep?.(step), time);
       }, '16n');
     }
-    this.transport.start('+0.1');
+    // The Transport is shared across track engines — only start it if idle.
+    if (this.transport.state !== 'started') {
+      this.transport.start('+0.1');
+    }
     this.seqPart.start('+0.1');
   }
 
   stopSequencer(): void {
+    this.seqPlaying = false;
     this.seqPart?.stop();
     if (this.seqStepEventId !== null) {
       this.transport.clear(this.seqStepEventId);
       this.seqStepEventId = null;
     }
-    this.transport.stop();
-    this.transport.position = 0;
+    // NOTE: the shared Transport keeps running (other tracks may play).
     this.panic();
   }
 
   isSequencerPlaying(): boolean {
-    return this.transport.state === 'started';
+    return this.seqPlaying;
   }
 
   private teardownSequencerPart(): void {
@@ -1188,17 +1201,11 @@ export class AudioEngine {
       node.dispose();
     }
     this.masterGain.dispose();
+    this.output.dispose();
     this.analyserNode.dispose();
     this.fftAnalyser.dispose();
   }
 }
 
-/** Singleton instance */
-let engineInstance: AudioEngine | null = null;
-
-export function getAudioEngine(): AudioEngine {
-  if (!engineInstance) {
-    engineInstance = new AudioEngine();
-  }
-  return engineInstance;
-}
+/* Engine instances are managed per-track by engine/registry.ts —
+   use getTrackEngine()/getAudioEngine() from there. */

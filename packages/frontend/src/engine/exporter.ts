@@ -1,13 +1,16 @@
 /**
- * WAV export — renders the current patch offline (faster than real time)
+ * WAV export — renders the current track(s) offline (faster than real time)
  * and encodes 16-bit PCM WAV.
  *
- * A throwaway AudioEngine is constructed INSIDE Tone.Offline's callback, so
- * every node binds to the OfflineAudioContext; the live engine is untouched
- * (Tone.Offline restores the global context before rendering starts).
+ * Throwaway AudioEngine instances are constructed INSIDE Tone.Offline's
+ * callback, so every node binds to the OfflineAudioContext; the live engines
+ * are untouched (Tone.Offline restores the global context before rendering).
+ * All engines created in the callback share the offline Transport, so
+ * multi-track patterns render in perfect sync.
  */
 import * as Tone from 'tone';
 import { AudioEngine } from './AudioEngine';
+import { resolveAudibility, type MixerParams } from './mixer';
 import type { SequencerPattern, SynthState } from './types';
 
 export interface ExportRequest {
@@ -17,6 +20,13 @@ export interface ExportRequest {
   duration?: number;
   /** Chord to demo when there is no sequencer pattern. */
   notes?: number[];
+}
+
+/** A track's renderable slice. */
+export interface ExportTrack {
+  synthState: SynthState;
+  pattern: SequencerPattern;
+  mixer: MixerParams;
 }
 
 interface RenderableBuffer {
@@ -68,41 +78,68 @@ export function audioBufferToWav(buffer: RenderableBuffer): Blob {
 }
 
 /**
- * Render the patch. With a pattern: loops it for `bars` bars plus a 1s tail.
- * Without: plays a chord for the given duration. Returns a WAV blob.
+ * Render the mix of all audible tracks (mute/solo honored). Patterns loop
+ * for `bars` bars plus a 1s tail; when no track has a pattern, a demo chord
+ * plays through the first audible track. Returns a WAV blob.
  */
-export async function renderPatchToWav(
-  state: SynthState,
-  pattern: SequencerPattern | null,
+export async function renderMixToWav(
+  tracks: ExportTrack[],
   request: ExportRequest = {},
 ): Promise<Blob> {
-  const useSequencer = !!pattern && pattern.notes.length > 0;
-  const bpm = state.master.bpm || 120;
+  const audible = resolveAudibility(
+    tracks.map((t, i) => ({ id: String(i), mute: t.mixer.mute, solo: t.mixer.solo })),
+  );
+  const active = tracks.filter((_, i) => audible.has(String(i)));
+  if (active.length === 0) {
+    throw new Error('没有可导出的音轨（全部被静音）');
+  }
+
+  // Global BPM: the shared Transport has one clock — use the first audible
+  // track's bpm (the tracks' master.bpm are last-writer-wins live, too).
+  const bpm = active[0].synthState.master.bpm || 120;
   const secPerBar = (60 / bpm) * 4;
 
+  const anyPattern = active.some((t) => t.pattern.notes.length > 0);
   let duration: number;
-  if (useSequencer) {
+  if (anyPattern) {
     const bars = Math.min(8, Math.max(1, Math.round(request.bars ?? 2)));
-    const barsPerLoop = (pattern!.steps / 16) || 1;
-    duration = barsPerLoop * bars * secPerBar + 1.0; // + tail
+    const maxLoopBars = Math.max(
+      ...active.map((t) => (t.pattern.notes.length > 0 ? t.pattern.steps / 16 : 0)),
+      1,
+    );
+    duration = maxLoopBars * bars * secPerBar + 1.0;
   } else {
     duration = Math.min(30, Math.max(0.5, request.duration ?? 3));
   }
 
   const toneBuffer = await Tone.Offline(async () => {
-    const engine = new AudioEngine();
-    engine.markOffline();
-    engine.applyState(state);
+    const master = new Tone.Gain(0.8);
+    master.toDestination();
 
-    if (useSequencer && pattern) {
-      engine.setSequencerPattern(pattern);
-      engine.startSequencer();
-    } else {
-      const notes =
-        request.notes && request.notes.length > 0 ? request.notes.slice(0, 8) : [60, 64, 67];
-      for (const n of notes) engine.noteOn(n, 100, 0.05);
-      const offAt = Math.max(0.2, duration - 1.0);
-      for (const n of notes) engine.noteOff(n, offAt);
+    let chordPlayed = false;
+    for (const track of active) {
+      const engine = new AudioEngine();
+      engine.markOffline();
+      engine.applyState(track.synthState);
+
+      // Channel strip: volume + pan
+      const gain = new Tone.Gain(track.mixer.volume);
+      const panner = new Tone.Panner(track.mixer.pan);
+      engine.output.connect(gain);
+      gain.connect(panner);
+      panner.connect(master);
+
+      if (track.pattern.notes.length > 0) {
+        engine.setSequencerPattern(track.pattern);
+        engine.startSequencer();
+      } else if (!anyPattern && !chordPlayed) {
+        chordPlayed = true;
+        const notes =
+          request.notes && request.notes.length > 0 ? request.notes.slice(0, 8) : [60, 64, 67];
+        for (const n of notes) engine.noteOn(n, 100, 0.05);
+        const offAt = Math.max(0.2, duration - 1.0);
+        for (const n of notes) engine.noteOff(n, offAt);
+      }
     }
   }, duration);
 
@@ -123,5 +160,5 @@ export function exportFilename(prefix = 'wavesyn'): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  return `${prefix}-${stamp}.wav`;
+  return `${prefix}-mix-${stamp}.wav`;
 }
