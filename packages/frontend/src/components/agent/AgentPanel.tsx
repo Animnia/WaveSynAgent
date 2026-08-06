@@ -34,6 +34,8 @@ export default function AgentPanel() {
   const setProvider = useAgentStore((s) => s.setProvider);
   const availableProviders = useAgentStore((s) => s.availableProviders);
   const fetchProviders = useAgentStore((s) => s.fetchProviders);
+  const planMode = useAgentStore((s) => s.planMode);
+  const togglePlanMode = useAgentStore((s) => s.togglePlanMode);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
 
@@ -92,6 +94,24 @@ export default function AgentPanel() {
     const msg = input.trim();
     if (!msg || isLoading) return;
     setInput('');
+    await sendToAgent(msg);
+  };
+
+  /** Resolve a plan card: mark it and relay the decision to the agent. */
+  const handlePlanResponse = async (
+    messageId: string,
+    plan: { title: string; steps: string[] },
+    confirmed: boolean,
+  ) => {
+    useAgentStore.getState().setPlanStatus(messageId, confirmed ? 'confirmed' : 'cancelled');
+    await sendToAgent(
+      confirmed
+        ? `确认执行计划「${plan.title}」，请按步骤执行。`
+        : `取消计划「${plan.title}」。`,
+    );
+  };
+
+  const sendToAgent = async (msg: string) => {
     // Attach track context so the agent sees the full picture: the active
     // track's state in full, plus a summary of every track.
     const tracksStore = useTracksStore.getState();
@@ -233,6 +253,17 @@ export default function AgentPanel() {
             ≡ HISTORY
           </button>
           <button
+            onClick={togglePlanMode}
+            className={`text-[10px] px-2 py-1 border transition-colors ${
+              planMode
+                ? 'text-accent-orange border-accent-orange/50 bg-accent-orange/10'
+                : 'text-text-muted border-border-default hover:text-text-primary hover:border-border-active'
+            }`}
+            title={planMode ? '计划模式已开启：改动前需先确认计划' : '开启计划模式：改动前需先确认计划'}
+          >
+            {planMode ? '📋 PLAN ✓' : '📋 PLAN'}
+          </button>
+          <button
             onClick={clearActiveSession}
             className="text-[10px] px-2 py-1 text-text-muted hover:text-text-primary border border-border-default hover:border-border-active transition-colors"
             title="清空当前对话"
@@ -296,7 +327,7 @@ export default function AgentPanel() {
         )}
 
         {messages.map((msg) => (
-          <MessageItem key={msg.id} message={msg} />
+          <MessageItem key={msg.id} message={msg} onPlanResponse={handlePlanResponse} />
         ))}
 
         <div ref={messagesEndRef} />
@@ -340,7 +371,17 @@ export default function AgentPanel() {
   );
 }
 
-function MessageItem({ message }: { message: AgentMessage }) {
+function MessageItem({
+  message,
+  onPlanResponse,
+}: {
+  message: AgentMessage;
+  onPlanResponse?: (
+    messageId: string,
+    plan: { title: string; steps: string[] },
+    confirmed: boolean,
+  ) => void;
+}) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
@@ -390,6 +431,16 @@ function MessageItem({ message }: { message: AgentMessage }) {
         </div>
       )}
 
+      {/* Plan card (propose_plan tool) */}
+      {message.plan && (
+        <PlanCard
+          plan={message.plan}
+          status={message.planStatus ?? 'pending'}
+          disabled={!!message.streaming}
+          onRespond={(confirmed) => onPlanResponse?.(message.id, message.plan!, confirmed)}
+        />
+      )}
+
       {/* Cancelled marker + token usage */}
       {message.cancelled && (
         <div className="mt-1 text-[10px] text-text-muted">■ 已停止</div>
@@ -406,6 +457,61 @@ function MessageItem({ message }: { message: AgentMessage }) {
         <div className="text-text-muted text-xs flex items-center gap-2">
           <span className="streaming-caret" />
           <span>思考中</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  status,
+  disabled,
+  onRespond,
+}: {
+  plan: { title: string; steps: string[] };
+  status: 'pending' | 'confirmed' | 'cancelled';
+  disabled?: boolean;
+  onRespond: (confirmed: boolean) => void;
+}) {
+  return (
+    <div
+      className={`mt-2 border rounded px-3 py-2 ${
+        status === 'confirmed'
+          ? 'border-accent-cyan/40 bg-accent-cyan/5'
+          : status === 'cancelled'
+            ? 'border-border-default bg-bg-tertiary opacity-60'
+            : 'border-accent-orange/40 bg-accent-orange/5'
+      }`}
+    >
+      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
+        📋 {plan.title}
+      </div>
+      <ol className="text-xs text-text-secondary space-y-0.5 mb-2 list-decimal list-inside">
+        {plan.steps.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ol>
+      {status === 'pending' ? (
+        <div className="flex gap-2">
+          <button
+            onClick={() => onRespond(true)}
+            disabled={disabled}
+            className="px-3 py-1 text-[11px] rounded border border-accent-cyan/50 bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-40"
+          >
+            ✓ 确认执行
+          </button>
+          <button
+            onClick={() => onRespond(false)}
+            disabled={disabled}
+            className="px-3 py-1 text-[11px] rounded border border-border-default text-text-muted hover:text-text-secondary transition-colors disabled:opacity-40"
+          >
+            ✕ 取消
+          </button>
+        </div>
+      ) : (
+        <div className="text-[10px] text-text-muted">
+          {status === 'confirmed' ? '✓ 已确认，执行中' : '✕ 已取消'}
         </div>
       )}
     </div>

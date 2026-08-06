@@ -169,3 +169,40 @@ class TestStreamingLoop:
         events = await collect(session, "hi", history=[])
         usage = by_type(events, "usage")
         assert usage and usage[0]["prompt_tokens"] == 120
+
+
+class TestPlanMode:
+    @pytest.mark.asyncio
+    async def test_plan_event_streams_through(self, synth_state):
+        provider = MockProvider(
+            [
+                tool_response(
+                    "propose_plan",
+                    {"title": "做贝斯", "steps": ["create_track", "set_params"]},
+                ),
+                text_response("等待确认"),
+            ]
+        )
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        events = await collect(session, "帮我做贝斯", history=[])
+        plans = by_type(events, "plan")
+        assert plans == [{"type": "plan", "title": "做贝斯", "steps": ["create_track", "set_params"]}]
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_injects_prompt_section(self, synth_state):
+        provider = MockProvider([text_response("ok")])
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        async for _ in session.chat_stream("hi", history=[], plan_mode=True):
+            pass
+        system_msg = provider.calls[0][0]  # first call, first message
+        assert system_msg.role == "system"
+        assert "计划模式" in system_msg.content
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_off_by_default(self, synth_state):
+        provider = MockProvider([text_response("ok")])
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        async for _ in session.chat_stream("hi", history=[]):
+            pass
+        system_msg = provider.calls[0][0]
+        assert "计划模式" not in system_msg.content

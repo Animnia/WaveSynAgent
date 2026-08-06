@@ -36,6 +36,9 @@ export interface AgentMessage {
   cancelled?: boolean;
   /** Accumulated token usage reported by the provider. */
   usage?: { prompt: number; completion: number };
+  /** Plan card proposed by the agent (propose_plan tool). */
+  plan?: { title: string; steps: string[] };
+  planStatus?: 'pending' | 'confirmed' | 'cancelled';
   timestamp: number;
 }
 
@@ -56,6 +59,8 @@ interface AgentState {
   availableProviders: { id: string; name: string; model: string }[];
   panelOpen: boolean;
   historyDrawerOpen: boolean;
+  /** Plan mode: the agent must propose a plan and wait for confirmation. */
+  planMode: boolean;
 }
 
 export interface AnalyzeRequest {
@@ -125,6 +130,9 @@ interface AgentActions {
   setProvider: (provider: string) => void;
   togglePanel: () => void;
   toggleHistoryDrawer: () => void;
+  togglePlanMode: () => void;
+  /** Resolve a plan card (confirm/cancel) on a given assistant message. */
+  setPlanStatus: (messageId: string, status: 'confirmed' | 'cancelled') => void;
   fetchProviders: () => Promise<void>;
 }
 
@@ -275,9 +283,20 @@ export const useAgentStore = create<AgentState & AgentActions>()(
       availableProviders: [],
       panelOpen: false,
       historyDrawerOpen: false,
+      planMode: false,
 
       togglePanel: () => set((s) => { s.panelOpen = !s.panelOpen; }),
       toggleHistoryDrawer: () => set((s) => { s.historyDrawerOpen = !s.historyDrawerOpen; }),
+
+      togglePlanMode: () => set((s) => { s.planMode = !s.planMode; }),
+
+      setPlanStatus: (messageId, status) => {
+        set((s) => {
+          const sess = s.sessions[s.activeSessionId];
+          const msg = sess?.messages.find((m) => m.id === messageId);
+          if (msg && msg.planStatus === 'pending') msg.planStatus = status;
+        });
+      },
       setProvider: (provider) => set((s) => { s.provider = provider; }),
 
       createSession: (title) => {
@@ -551,6 +570,17 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                     notes: Array.isArray(evt.notes) ? (evt.notes as number[]) : undefined,
                   });
                   break;
+                case 'plan':
+                  updateAssistant((m) => {
+                    m.plan = {
+                      title: typeof evt.title === 'string' ? evt.title : '计划',
+                      steps: Array.isArray(evt.steps)
+                        ? (evt.steps as unknown[]).map(String).slice(0, 12)
+                        : [],
+                    };
+                    m.planStatus = 'pending';
+                  });
+                  break;
                 case 'analyze_request': {
                   // The agent asked us to be its ears: play notes, analyze,
                   // and relay the features back over the same socket.
@@ -614,6 +644,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             message,
             history,
             synthState,
+            planMode: get().planMode,
             // Omit provider when unset — the backend default applies.
             ...(get().provider ? { provider: get().provider } : {}),
           });
@@ -635,6 +666,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
         sessionOrder: s.sessionOrder,
         activeSessionId: s.activeSessionId,
         provider: s.provider,
+        planMode: s.planMode,
       }),
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) } as AgentState & AgentActions;

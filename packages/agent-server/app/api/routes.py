@@ -168,7 +168,11 @@ async def agent_websocket(ws: WebSocket):
             channel=channel,
         )
         try:
-            async for event in session.chat_stream(msg["message"], history=msg.get("history", [])):
+            async for event in session.chat_stream(
+                msg["message"],
+                history=msg.get("history", []),
+                plan_mode=bool(msg.get("planMode")),
+            ):
                 await ws.send_json(event)
         except asyncio.CancelledError:
             # Client aborted the turn — confirm so it can settle its UI.

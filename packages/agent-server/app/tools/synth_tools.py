@@ -571,6 +571,32 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_plan",
+            "description": (
+                "Propose a step-by-step plan to the user BEFORE executing it. The plan is "
+                "rendered as a card the user can confirm or cancel. Use for multi-step work "
+                "(designing a layered patch, building an arrangement across tracks) and "
+                "ALWAYS when plan mode is on. After the user confirms, execute the steps."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Short plan title"},
+                    "steps": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "items": {"type": "string"},
+                        "description": "Ordered steps, each one line (e.g. '1. 新建 Bass 轨并调出 sub 音色')",
+                    },
+                },
+                "required": ["title", "steps"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -852,6 +878,23 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "result": f"Track mixer updated: { {k: v for k, v in mixer.items() if k != 'track'} }",
                 "mutations": [],
                 "track_mixer": mixer,
+            }
+
+        case "propose_plan":
+            title = str(arguments.get("title", "")).strip()[:60] or "计划"
+            raw_steps = arguments.get("steps") or []
+            if not isinstance(raw_steps, list):
+                return {"result": "propose_plan requires a 'steps' array", "mutations": []}
+            steps = [str(s).strip()[:120] for s in raw_steps if str(s).strip()][:12]
+            if not steps:
+                return {"result": "propose_plan requires at least one step", "mutations": []}
+            return {
+                "result": (
+                    f"Plan proposed ({len(steps)} steps). WAIT for the user's confirmation "
+                    "message before executing — do not call mutation tools yet."
+                ),
+                "mutations": [],
+                "plan": {"title": title, "steps": steps},
             }
 
         case "explain_concept":

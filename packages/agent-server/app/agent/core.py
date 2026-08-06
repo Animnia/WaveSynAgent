@@ -9,6 +9,11 @@ from ..config import settings
 from ..providers.base import LLMProvider, LLMResponse, Message
 from ..tools.synth_tools import SYNTH_TOOLS, AnalysisChannel, execute_tool_async
 
+PLAN_MODE_SECTION = """
+## ⚠️ 计划模式已开启
+用户开启了计划模式。对于任何需要修改参数/音轨的请求，你**必须先调用 propose_plan** 提交分步计划，然后**停下来等待用户确认**（用户会回复「确认执行」或「取消」）。确认后才按计划逐步执行；取消则提出替代方案或结束。纯问答/讲解类请求不需要计划。
+"""
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 助手。你同时是专业的制作人、音色设计师和音乐教师。
@@ -105,6 +110,7 @@ class AgentSession:
         new_message: str,
         synth_state: dict[str, Any] | None = None,
         max_history: int = 50,
+        plan_mode: bool = False,
     ) -> list[Message]:
         """Build a fresh message list for a stateless turn.
 
@@ -112,7 +118,8 @@ class AgentSession:
         - Truncates `history` to the last `max_history` messages (preserving order).
         - Appends the new user message with synth state context injected.
         """
-        msgs: list[Message] = [Message(role="system", content=SYSTEM_PROMPT)]
+        prompt = SYSTEM_PROMPT + (PLAN_MODE_SECTION if plan_mode else "")
+        msgs: list[Message] = [Message(role="system", content=prompt)]
 
         # Normalize history -> Message instances
         normalized: list[Message] = []
@@ -252,6 +259,7 @@ class AgentSession:
         self,
         user_message: str,
         history: list[dict[str, Any]] | list[Message] | None = None,
+        plan_mode: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         """Streaming version of chat() — yields events as they happen.
 
@@ -270,7 +278,9 @@ class AgentSession:
         """
         if history is not None:
             # Stateless mode — build fresh message list per turn
-            messages = self.build_messages(history, user_message, self.synth_state)
+            messages = self.build_messages(
+                history, user_message, self.synth_state, plan_mode=plan_mode
+            )
         else:
             # Legacy stateful mode (kept for REST /chat path)
             state_context = (
@@ -365,6 +375,9 @@ class AgentSession:
 
                     if "sequencer_control" in result:
                         yield {"type": "sequencer_control", **result["sequencer_control"]}
+
+                    if "plan" in result:
+                        yield {"type": "plan", **result["plan"]}
 
                     if "create_track" in result:
                         yield {"type": "create_track", **result["create_track"]}

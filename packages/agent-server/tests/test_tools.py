@@ -326,3 +326,30 @@ class TestExportAudio:
         assert payload["bars"] == 8
         assert payload["duration"] == 0.5
         assert payload["notes"] == [60, 64]
+
+
+class TestProposePlan:
+    def test_plan_payload(self, synth_state):
+        result = execute_tool(
+            "propose_plan",
+            {"title": "分层铺底", "steps": ["新建 Pad 轨", "设计音色", "写 pattern"]},
+            synth_state,
+        )
+        assert result["plan"] == {
+            "title": "分层铺底",
+            "steps": ["新建 Pad 轨", "设计音色", "写 pattern"],
+        }
+        assert "WAIT" in result["result"]  # agent told to pause for confirmation
+
+    def test_plan_requires_steps(self, synth_state):
+        result = execute_tool("propose_plan", {"title": "x", "steps": []}, synth_state)
+        assert "plan" not in result
+
+    def test_plan_truncates_and_sanitizes(self, synth_state):
+        result = execute_tool(
+            "propose_plan",
+            {"title": "t" * 100, "steps": ["  ok  ", "", "  ", "fine"]},
+            synth_state,
+        )
+        assert len(result["plan"]["title"]) == 60
+        assert result["plan"]["steps"] == ["ok", "fine"]
