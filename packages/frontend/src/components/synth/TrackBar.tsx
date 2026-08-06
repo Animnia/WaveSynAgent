@@ -13,6 +13,7 @@ export default function TrackBar() {
   const deleteTrack = useTracksStore((s) => s.deleteTrack);
   const renameTrack = useTracksStore((s) => s.renameTrack);
   const setMixerParams = useTracksStore((s) => s.setMixerParams);
+  const toggleTrackEnabled = useTracksStore((s) => s.toggleTrackEnabled);
   const toggleTrack = useTracksStore((s) => s.toggleTrack);
 
   return (
@@ -27,12 +28,18 @@ export default function TrackBar() {
               isActive
                 ? 'border-border-active bg-bg-tertiary'
                 : 'border-border-default bg-bg-primary hover:border-border-active/50'
-            }`}
+            } ${t.enabled ? '' : 'opacity-50'}`}
           >
-            {/* Status dot (monochrome — filled when the track is playing) */}
-            <span
-              className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                t.playing ? 'bg-text-primary' : 'border border-text-muted'
+            {/* Power dot — click to enable/disable the track */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleTrackEnabled(t.id);
+              }}
+              title={t.enabled ? 'Disable track (silence + stop)' : 'Enable track'}
+              aria-label={`${t.enabled ? 'Disable' : 'Enable'} ${t.name}`}
+              className={`w-2 h-2 rounded-full flex-shrink-0 transition-colors ${
+                t.enabled ? 'bg-text-primary' : 'bg-bg-tertiary border border-text-muted'
               }`}
             />
             <input

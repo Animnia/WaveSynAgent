@@ -95,8 +95,8 @@ export default function SynthWorkstation() {
   return (
     <div className="h-full flex flex-col bg-bg-primary">
       {/* ===== Top Bar ===== */}
-      <header className="flex items-center justify-between px-4 py-2 border-b border-border-default bg-bg-secondary">
-        <div className="flex items-center gap-3">
+      <header className="grid grid-cols-[1fr_auto_1fr] items-center px-4 py-2 border-b border-border-default bg-bg-secondary">
+        <div className="flex items-center gap-3 justify-self-start">
           <h1 className="text-sm font-bold text-accent-cyan tracking-wider">
             WAVESYN<span className="text-accent-purple">AGENT</span>
           </h1>
@@ -104,8 +104,10 @@ export default function SynthWorkstation() {
             v0.1
           </span>
         </div>
-        <MasterPanel />
-        <div className="flex items-center gap-2">
+        <div className="justify-self-center">
+          <MasterPanel />
+        </div>
+        <div className="flex items-center gap-2 justify-self-end">
           <button
             onClick={undo}
             disabled={!canUndo}
