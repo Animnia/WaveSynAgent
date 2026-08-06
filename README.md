@@ -18,16 +18,19 @@
 - **双 LFO + 调制矩阵**：双极 depth（-1 ~ 1），源 LFO1/LFO2/**ModWheel**，目标含滤波、音量、效果参数与声部级 pitch/pan
 - **9 种效果器**：Distortion、BitCrusher、Compressor、EQ3、Chorus、Phaser、Delay、Reverb、StereoWidener，**效果链顺序可自由拖拽重排**
 - **16 复音**，虚拟键盘 + 电脑键盘 + **Web MIDI 输入**（延音踏板 CC64 / 调制轮 CC1），示波器 + FFT 频谱实时可视化
-- **步进序列器**：16/32 步网格、BPM 跟随、循环播放、热插拔编辑
-- **WAV 导出**：当前音色或序列器 loop 离线渲染为 16-bit 立体声 WAV
+- **多轨工作**：最多 8 轨，每轨独立合成引擎 + 序列器 pattern + 混音通道（音量/声像/mute/solo），共享全局 Transport 严格同步；轨道栏快速切换/新建/删除
+- **步进序列器**：每轨独立 16/32 步网格、循环播放、播放中热编辑
+- **WAV 导出**：全部可听轨的混音（尊重 mute/solo）离线渲染为 16-bit 立体声 WAV
 - **Undo/Redo**：全参数历史栈（Ctrl+Z / Ctrl+Shift+Z），用户与 Agent 操作统一记录
 
 ### 🤖 AI Agent
 - 自然语言调音：描述目标音色，Agent 自动规划并执行多步参数调整
-- **20 个工具**：`set_params`（批量调参）、`read_synth_state`、`set_oscillator`、`set_filter`、`set_envelope`、`set_lfo`、`set_effects`、`set_mod_route`、`reorder_effect_chain`、`play_notes`、`sequence_pattern`、`sequencer_control`、`export_audio`、`analyze_audio`、`snapshot_patch`、`restore_snapshot`、`undo_last_change`、`save_preset` 等
+- **25 个工具**：`set_params`（批量调参）、`read_synth_state`、各合成器面板专用工具、`set_mod_route`、`reorder_effect_chain`、`play_notes`、`sequence_pattern`、`sequencer_control`、`export_audio`、`analyze_audio`、`snapshot_patch`、`restore_snapshot`、`undo_last_change`、`save_preset`、**多轨工具**（`create_track` / `select_track` / `set_track_mixer`，`set_params` 等支持 `track_index` 定向）、`propose_plan`、`update_preferences`
 - **会听的 Agent**：`analyze_audio` 播放音符并回传响度/削波/明亮度/频段分布，形成 调整→验证→再调整 闭环
-- 边调边讲：解释调整思路与音乐理论；可调完立即 `play_notes` 试听或写一段序列器 loop
-- 多会话管理、思考过程与操作历史可视化、流式输出、**可中断生成**（Stop 按钮）
+- **计划模式**：开启后 Agent 改动前先提交分步计划卡，用户确认才执行
+- **口味记忆**：用户表达的稳定偏好（“我喜欢暗的音色”）被记住并跨会话注入上下文
+- **会话摘要压缩**：长对话自动把早期消息压缩为确定性摘要（不额外消耗 token）
+- 多会话管理、思考过程与操作历史可视化、流式输出、**可中断生成**（Stop 按钮）、回合耗时与 token 用量显示
 - 快照工作流：大改前自动 `snapshot_patch`，不满意可 `restore_snapshot` 回滚
 - 安全护栏：参数范围双端校验（注册表驱动）、工具调用次数上限、会话看门狗
 
