@@ -30,6 +30,12 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "track_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7,
+                        "description": "Target track (0-based). Omit to target the ACTIVE track.",
+                    },
                     "params": {
                         "type": "array",
                         "minItems": 1,
@@ -429,6 +435,12 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "track_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7,
+                        "description": "Target track (0-based). Omit to target the ACTIVE track.",
+                    },
                     "steps": {"type": "integer", "enum": [16, 32]},
                     "notes": {
                         "type": "array",
@@ -454,11 +466,17 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "sequencer_control",
-            "description": "Start or stop the step sequencer. Start it after writing a pattern so the user hears the loop; stop when asked or before demonstrating one-shot notes.",
+            "description": "Start or stop a track's step sequencer. Start it after writing a pattern so the user hears the loop; stop when asked or before demonstrating one-shot notes.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "action": {"type": "string", "enum": ["start", "stop"]},
+                    "track_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7,
+                        "description": "Target track (0-based). Omit to target the ACTIVE track.",
+                    },
                 },
                 "required": ["action"],
             },
@@ -483,6 +501,68 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
                         "items": {"type": "integer", "minimum": 21, "maximum": 108},
                         "description": "Chord for the demo render (default C major triad).",
                     },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_track",
+            "description": (
+                "Create a new track with its own independent synth engine + pattern, and "
+                "switch to it. Use for layering sounds (e.g. a bass on track 2 under a pad "
+                "on track 1). Max 8 tracks. The track list is in your context as 'tracks'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Track name (e.g. 'Bass', 'Pad')"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "select_track",
+            "description": (
+                "Switch the active track. The active track is what the user is looking at; "
+                "set_params/sequence_pattern/sequencer_control default to it. Its synth state "
+                "becomes your context on the next turn."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "track_index": {"type": "integer", "minimum": 0, "maximum": 7},
+                },
+                "required": ["track_index"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_track_mixer",
+            "description": (
+                "Mix a track in the multi-track mixer: level, pan, mute, solo. Use for "
+                "balancing layers (e.g. 'make the pad quieter', 'solo the bass')."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "track_index": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 7,
+                        "description": "Target track (0-based). Omit for the ACTIVE track.",
+                    },
+                    "volume": {"type": "number", "minimum": 0, "maximum": 1},
+                    "pan": {"type": "number", "minimum": -1, "maximum": 1},
+                    "mute": {"type": "boolean"},
+                    "solo": {"type": "boolean"},
                 },
                 "required": [],
             },
@@ -678,10 +758,19 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
             action = arguments.get("action")
             if action not in ("start", "stop"):
                 return {"result": "sequencer_control requires action='start'|'stop'", "mutations": []}
+            payload: dict[str, Any] = {"action": action}
+            track = _valid_track_index(arguments.get("track_index"))
+            if track is not None:
+                payload["track"] = track
+                return {
+                    "result": f"Sequencer {action} on track {track}.",
+                    "mutations": [],
+                    "sequencer_control": payload,
+                }
             return {
                 "result": f"Sequencer {action}.",
                 "mutations": [],
-                "sequencer_control": action,
+                "sequencer_control": payload,
             }
 
         case "export_audio":
@@ -723,12 +812,63 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "mutations": [],
             }
 
+        case "create_track":
+            name = str(arguments.get("name", "")).strip()[:24]
+            payload: dict[str, Any] = {}
+            if name:
+                payload["name"] = name
+            return {
+                "result": f"Created track{' ' + name if name else ''} and switched to it (max 8 tracks).",
+                "mutations": [],
+                "create_track": payload,
+            }
+
+        case "select_track":
+            track = _valid_track_index(arguments.get("track_index"))
+            if track is None:
+                return {"result": "select_track requires track_index in [0, 7]", "mutations": []}
+            return {
+                "result": f"Active track is now {track}. Its synth state comes with the next turn's context.",
+                "mutations": [],
+                "select_track": track,
+            }
+
+        case "set_track_mixer":
+            mixer: dict[str, Any] = {}
+            track = _valid_track_index(arguments.get("track_index"))
+            if track is not None:
+                mixer["track"] = track
+            if isinstance(arguments.get("volume"), (int, float)):
+                mixer["volume"] = max(0.0, min(1.0, float(arguments["volume"])))
+            if isinstance(arguments.get("pan"), (int, float)):
+                mixer["pan"] = max(-1.0, min(1.0, float(arguments["pan"])))
+            if isinstance(arguments.get("mute"), bool):
+                mixer["mute"] = arguments["mute"]
+            if isinstance(arguments.get("solo"), bool):
+                mixer["solo"] = arguments["solo"]
+            if len(mixer) == (1 if track is not None else 0):
+                return {"result": "set_track_mixer: nothing to set (volume/pan/mute/solo)", "mutations": []}
+            return {
+                "result": f"Track mixer updated: { {k: v for k, v in mixer.items() if k != 'track'} }",
+                "mutations": [],
+                "track_mixer": mixer,
+            }
+
         case "explain_concept":
             # The LLM's text response IS the explanation; we just pass through
             return {"result": f"[Explaining: {arguments.get('topic', '?')}]", "mutations": []}
 
         case _:
             return {"result": f"Unknown tool: {tool_name}", "mutations": []}
+
+
+def _valid_track_index(v: Any) -> int | None:
+    """0-based track index or None when absent/invalid."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)) and float(v).is_integer() and 0 <= int(v) <= 7:
+        return int(v)
+    return None
 
 
 def _sequence_pattern(args: dict) -> dict:
@@ -764,9 +904,14 @@ def _sequence_pattern(args: dict) -> dict:
         return {"result": "no valid notes in pattern (check note/start ranges)", "mutations": []}
 
     result = f"Pattern written: {steps} steps, {len(valid)} notes"
+    track = _valid_track_index(args.get("track_index"))
+    if track is not None:
+        result += f" on track {track}"
     if skipped:
         result += f" ({skipped} invalid skipped)"
     payload: dict[str, Any] = {"steps": steps, "notes": valid}
+    if track is not None:
+        payload["track"] = track
     name = args.get("name")
     if isinstance(name, str) and name.strip():
         payload["name"] = name.strip()[:40]
@@ -779,18 +924,23 @@ def _set_params(args: dict) -> dict:
     if not isinstance(entries, list) or not entries:
         return {"result": "set_params requires a non-empty 'params' array", "mutations": []}
 
+    track = _valid_track_index(args.get("track_index"))
     raw: list[dict[str, Any]] = []
     shape_errors: list[str] = []
     for i, e in enumerate(entries):
         if not isinstance(e, dict) or "path" not in e or "value" not in e:
             shape_errors.append(f"params[{i}] must be an object with 'path' and 'value'")
             continue
-        raw.append({"path": str(e["path"]), "value": e["value"]})
+        mut = {"path": str(e["path"]), "value": e["value"]}
+        if track is not None:
+            mut["track"] = track
+        raw.append(mut)
 
     valid, errors = validate_mutations(raw)
     errors = shape_errors + errors
 
-    summary = f"Applied {len(valid)} parameter(s)."
+    summary = f"Applied {len(valid)} parameter(s)"
+    summary += f" on track {track}." if track is not None else "."
     if errors:
         summary += " Rejected: " + "; ".join(errors)
     return {"result": summary, "mutations": valid}
@@ -984,5 +1134,30 @@ def _format_state(state: dict) -> str:
             )
             if brief:
                 lines.append(f"  notes: {brief}{' …' if len(notes) > 16 else ''}")
+
+    tracks = state.get("tracks")
+    if isinstance(tracks, list) and tracks:
+        active_idx = state.get("activeTrack", 0)
+        lines.append("Tracks:")
+        for t in tracks:
+            if not isinstance(t, dict):
+                continue
+            flags = []
+            if t.get("active"):
+                flags.append("ACTIVE")
+            if t.get("playing"):
+                flags.append("PLAYING")
+            if t.get("mute"):
+                flags.append("MUTED")
+            if t.get("solo"):
+                flags.append("SOLO")
+            flag_str = f" [{' '.join(flags)}]" if flags else ""
+            lines.append(
+                f"  [{t.get('index', '?')}] {t.get('name', '?')}{flag_str} "
+                f"vol={t.get('volume', 0):.2f} pan={t.get('pan', 0):.2f} "
+                f"pattern={t.get('patternNotes', 0)} notes"
+            )
+        if not any(isinstance(t, dict) and t.get("active") for t in tracks):
+            lines.append(f"  (activeTrack index: {active_idx})")
 
     return "\n".join(lines)

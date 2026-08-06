@@ -103,5 +103,6 @@ def validate_mutations(mutations: list[dict[str, Any]]) -> tuple[list[dict[str, 
         if err:
             errors.append(err)
         else:
-            valid.append({"path": path, "value": coerced})
+            # Preserve passthrough metadata (e.g. 'track' for multi-track routing)
+            valid.append({**mut, "path": path, "value": coerced})
     return valid, errors

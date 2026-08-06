@@ -21,7 +21,8 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - 保存预设（save_preset）
 - 快照与撤销：snapshot_patch 保存恢复点 / restore_snapshot 恢复 / undo_last_change 撤销最近改动
 - 步进序列器：sequence_pattern 编写 16/32 步循环 pattern（走当前音色）/ sequencer_control 启停——用户能从序列器面板看到并逐步修改你写的 pattern
-- WAV 导出：export_audio 把当前音色（或序列器 loop）离线渲染成 WAV 并自动下载
+- **多轨制作**：create_track 新建独立音轨（最多 8 轨，各自独立音色+pattern+混音）/ select_track 切换活动轨 / set_track_mixer 调音轨电平、声像、静音、solo。set_params / sequence_pattern / sequencer_control 均可带 track_index 指定目标轨（省略=活动轨）
+- WAV 导出：export_audio 把**所有可听音轨的混音**（尊重 mute/solo）离线渲染成 WAV 并自动下载
 - 音频分析：analyze_audio 播放音符并分析实际输出（响度/削波/明亮度/频段分布），用于验证调音结果
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
@@ -38,6 +39,13 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
    - 多个音同时演奏（和弦）→ mode='chord'（默认）
    - 多个音依次演奏（旋律/琶音）→ mode='sequence', 配合 interval 控制节奏
    - duration 通常 0.5-1.5s, interval 0.2-0.5s
+
+## 多轨工作流
+- 状态里的 tracks 数组列出所有轨道（index/name/active/playing/音量声像/pattern 音符数）；当前活动轨的完整参数在你的常规状态中
+- 想叠一层声音？流程：create_track（自动切到新轨）→ set_params 设计音色 → sequence_pattern 写 pattern → sequencer_control 播放。各轨共享全局 Transport（同一 BPM 时钟，完全同步）
+- 修改非活动轨用 track_index；但**音色设计类工作建议先 select_track 切过去**，让该轨状态进入你的上下文，用户界面也会跟着切换
+- set_track_mixer 做平衡：如“bass 小点声”→ volume≈0.5；“只听 pad”→ solo=true
+- BPM 是全局的（所有轨共用一个时钟）；master.bpm 改动影响所有轨
 
 ## 参数范围速查
 - Oscillator: type ∈ {sine, triangle, sawtooth, square, custom(波表)} | wavetable ∈ {morph, formant, digital, soft}（仅 custom 生效） | wavetablePosition 0-1（波表帧间 morph） | Volume 0-1 | Semitone ±24 | Fine ±100 cents | Unison 1-8 | fmAmount 0-1（仅 OSC1 生效：OSC2→OSC1 音频级 FM，0.1-0.3 细腻咆哮，0.4+ 金属/钟声）
@@ -199,10 +207,15 @@ class AgentSession:
 
                     # Apply mutations to local state copy (best-effort; frontend re-applies authoritatively)
                     for mut in result.get("mutations", []):
-                        try:
-                            _apply_mutation(self.synth_state, mut["path"], mut["value"])
-                        except (KeyError, IndexError, TypeError):
-                            pass
+                        # Mutations targeted at another track don't touch the
+                        # local mirror (which mirrors the ACTIVE track).
+                        target = mut.get("track")
+                        active = self.synth_state.get("activeTrack")
+                        if target is None or target == active:
+                            try:
+                                _apply_mutation(self.synth_state, mut["path"], mut["value"])
+                            except (KeyError, IndexError, TypeError):
+                                pass
                         all_mutations.append(mut)
 
                     if "play" in result:
@@ -325,10 +338,15 @@ class AgentSession:
                     )
 
                     for mut in result.get("mutations", []):
-                        try:
-                            _apply_mutation(self.synth_state, mut["path"], mut["value"])
-                        except (KeyError, IndexError, TypeError):
-                            pass
+                        # Mutations targeted at another track don't touch the
+                        # local mirror (which mirrors the ACTIVE track).
+                        target = mut.get("track")
+                        active = self.synth_state.get("activeTrack")
+                        if target is None or target == active:
+                            try:
+                                _apply_mutation(self.synth_state, mut["path"], mut["value"])
+                            except (KeyError, IndexError, TypeError):
+                                pass
                         yield {"type": "mutation", **mut}
 
                     if "play" in result:
@@ -346,7 +364,16 @@ class AgentSession:
                         yield {"type": "sequencer_pattern", **result["sequencer_pattern"]}
 
                     if "sequencer_control" in result:
-                        yield {"type": "sequencer_control", "action": result["sequencer_control"]}
+                        yield {"type": "sequencer_control", **result["sequencer_control"]}
+
+                    if "create_track" in result:
+                        yield {"type": "create_track", **result["create_track"]}
+
+                    if "select_track" in result:
+                        yield {"type": "select_track", "track": result["select_track"]}
+
+                    if "track_mixer" in result:
+                        yield {"type": "track_mixer", **result["track_mixer"]}
 
                     if "export_audio" in result:
                         yield {"type": "export_audio", **result["export_audio"]}

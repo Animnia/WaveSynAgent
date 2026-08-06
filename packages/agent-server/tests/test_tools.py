@@ -242,11 +242,73 @@ class TestSequencerTools:
 
     def test_sequencer_control(self, synth_state):
         start = execute_tool("sequencer_control", {"action": "start"}, synth_state)
-        assert start["sequencer_control"] == "start"
+        assert start["sequencer_control"] == {"action": "start"}
         stop = execute_tool("sequencer_control", {"action": "stop"}, synth_state)
-        assert stop["sequencer_control"] == "stop"
+        assert stop["sequencer_control"] == {"action": "stop"}
         bad = execute_tool("sequencer_control", {"action": "explode"}, synth_state)
         assert "sequencer_control" not in bad
+
+    def test_sequencer_control_track_targeting(self, synth_state):
+        result = execute_tool(
+            "sequencer_control", {"action": "start", "track_index": 2}, synth_state
+        )
+        assert result["sequencer_control"] == {"action": "start", "track": 2}
+
+    def test_sequence_pattern_track_targeting(self, synth_state):
+        result = execute_tool(
+            "sequence_pattern",
+            {"steps": 16, "notes": [{"note": 60, "start": 0}], "track_index": 1},
+            synth_state,
+        )
+        assert result["sequencer_pattern"]["track"] == 1
+
+
+class TestTrackTools:
+    def test_set_params_track_index_propagates(self, synth_state):
+        result = execute_tool(
+            "set_params",
+            {
+                "track_index": 3,
+                "params": [{"path": "filter.cutoff", "value": 800}],
+            },
+            synth_state,
+        )
+        assert result["mutations"] == [{"path": "filter.cutoff", "value": 800, "track": 3}]
+
+    def test_set_params_invalid_track_index_dropped(self, synth_state):
+        result = execute_tool(
+            "set_params",
+            {"track_index": 99, "params": [{"path": "filter.cutoff", "value": 800}]},
+            synth_state,
+        )
+        # Invalid index falls back to active-track targeting (no track field)
+        assert result["mutations"] == [{"path": "filter.cutoff", "value": 800}]
+
+    def test_create_track(self, synth_state):
+        result = execute_tool("create_track", {"name": "Bass"}, synth_state)
+        assert result["create_track"] == {"name": "Bass"}
+        anon = execute_tool("create_track", {}, synth_state)
+        assert anon["create_track"] == {}
+
+    def test_select_track(self, synth_state):
+        ok = execute_tool("select_track", {"track_index": 2}, synth_state)
+        assert ok["select_track"] == 2
+        bad = execute_tool("select_track", {"track_index": 99}, synth_state)
+        assert "select_track" not in bad
+
+    def test_set_track_mixer(self, synth_state):
+        result = execute_tool(
+            "set_track_mixer",
+            {"track_index": 1, "volume": 0.5, "pan": 2.0, "solo": True},
+            synth_state,
+        )
+        # pan clamped to [-1, 1]; track + solo pass through
+        assert result["track_mixer"] == {"track": 1, "volume": 0.5, "pan": 1.0, "solo": True}
+
+    def test_set_track_mixer_nothing_to_set(self, synth_state):
+        result = execute_tool("set_track_mixer", {}, synth_state)
+        assert "track_mixer" not in result
+        assert "nothing to set" in result["result"]
 
 
 class TestExportAudio:
