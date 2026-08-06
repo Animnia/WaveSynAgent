@@ -15,6 +15,8 @@ export interface TrackSlot {
   synthState: SynthState;
   pattern: SequencerPattern;
   mixer: MixerParams;
+  /** Track power switch — a disabled track is silent and won't play. */
+  enabled: boolean;
   playing: boolean;
   /** Per-track undo stacks (swapped into synthStore while active). */
   past: SynthState[];
@@ -46,6 +48,7 @@ function makeTrack(name: string): TrackSlot {
     synthState: createDefaultSynthState(),
     pattern: { id: 'main', name: 'Pattern 1', steps: 16, notes: [] },
     mixer: { ...DEFAULT_MIXER },
+    enabled: true,
     playing: false,
     past: [],
     future: [],
@@ -89,6 +92,10 @@ interface TracksActions {
   selectTrack: (id: string) => void;
   renameTrack: (id: string, name: string) => void;
   setMixerParams: (id: string, partial: Partial<MixerParams>) => void;
+  /** Toggle the track's power (disabled = silent + stops playback). */
+  toggleTrackEnabled: (id: string) => void;
+  /** Re-apply mute/solo/enabled audibility to every channel strip. */
+  refreshMixer: () => void;
 
   /** Path-based mutation routed to any track (agent entry point). */
   applyMutationToTrack: (trackIndex: number, path: string, value: unknown) => boolean;
@@ -124,7 +131,11 @@ export const useTracksStore = create<TracksState & TracksActions>()(
       const refreshMixer = () => {
         const s = get();
         const audible = resolveAudibility(
-          s.tracks.map((t) => ({ id: t.id, mute: t.mixer.mute, solo: t.mixer.solo })),
+          s.tracks.map((t) => ({
+            id: t.id,
+            mute: t.mixer.mute || !t.enabled,
+            solo: t.mixer.solo,
+          })),
         );
         for (const t of s.tracks) {
           applyMixerParams(t.id, t.mixer, audible.has(t.id));
@@ -213,6 +224,19 @@ export const useTracksStore = create<TracksState & TracksActions>()(
           });
           refreshMixer();
         },
+
+        toggleTrackEnabled: (id) => {
+          const track = get().tracks.find((t) => t.id === id);
+          if (!track) return;
+          if (track.enabled && track.playing) get().stopTrack(id);
+          set((s) => {
+            const t = s.tracks.find((x) => x.id === id);
+            if (t) t.enabled = !t.enabled;
+          });
+          refreshMixer();
+        },
+
+        refreshMixer: () => refreshMixer(),
 
         applyMutationToTrack: (trackIndex, path, value) => {
           const s = get();
@@ -325,7 +349,7 @@ export const useTracksStore = create<TracksState & TracksActions>()(
 
         playTrack: async (trackId) => {
           const track = get().tracks.find((t) => t.id === trackId);
-          if (!track) return;
+          if (!track || !track.enabled) return;
           const engine = getTrackEngine(trackId);
           await engine.start();
           engine.setSequencerPattern(track.pattern);
@@ -362,7 +386,9 @@ export const useTracksStore = create<TracksState & TracksActions>()(
         setCurrentStep: (step) => set((s) => { s.currentStep = step; }),
         setSeqBaseNote: (note) =>
           set((s) => {
-            s.seqBaseNote = Math.min(96, Math.max(24, Math.round(note / 12) * 12));
+            // Continuous (semitone) resolution — the grid window scrolls
+            // smoothly as the slider moves, like scrolling a page.
+            s.seqBaseNote = Math.min(96, Math.max(24, Math.round(note)));
           }),
         shiftSeqOctave: (direction) =>
           set((s) => {
@@ -382,6 +408,7 @@ export const useTracksStore = create<TracksState & TracksActions>()(
           synthState: t.synthState,
           pattern: t.pattern,
           mixer: t.mixer,
+          enabled: t.enabled,
         })),
         activeTrackId: s.activeTrackId,
         sequencerPanelOpen: s.sequencerPanelOpen,
@@ -393,6 +420,7 @@ export const useTracksStore = create<TracksState & TracksActions>()(
         // Restore runtime-only fields on rehydrated slots.
         const tracks = p.tracks.map((t) => ({
           ...t,
+          enabled: t.enabled ?? true,
           playing: false,
           past: t.past ?? [],
           future: t.future ?? [],
@@ -414,6 +442,8 @@ export const useTracksStore = create<TracksState & TracksActions>()(
   const slot = s.tracks.find((t) => t.id === s.activeTrackId) ?? s.tracks[0];
   setActiveEngineTrack(slot.id);
   useSynthStore.getState().bindTrack(slot.id, slot.synthState, slot.past, slot.future);
+  // Apply persisted mixer/enabled state to the channel strips on boot.
+  s.refreshMixer();
 }
 
 /** Convenience selector: the active track slot. */

@@ -82,7 +82,7 @@ export default function SequencerPanel() {
             type="range"
             min={24}
             max={96}
-            step={12}
+            step={1}
             value={baseNote}
             onChange={(e) => setSeqBaseNote(parseInt(e.target.value, 10))}
             className="range-vertical"

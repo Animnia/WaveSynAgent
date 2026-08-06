@@ -49,8 +49,14 @@ export default function TrackBar() {
                 e.stopPropagation();
                 void toggleTrack(t.id);
               }}
-              disabled={t.pattern.notes.length === 0 && !t.playing}
-              title={t.pattern.notes.length === 0 ? '(no pattern)' : 'Play/stop this track\'s sequencer'}
+              disabled={!t.enabled || (t.pattern.notes.length === 0 && !t.playing)}
+              title={
+                !t.enabled
+                  ? 'Track disabled'
+                  : t.pattern.notes.length === 0
+                    ? '(no pattern)'
+                    : 'Play/stop this track\'s sequencer'
+              }
               className={`text-[10px] w-5 h-5 rounded border transition-colors disabled:opacity-25 ${
                 t.playing
                   ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'

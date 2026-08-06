@@ -24,7 +24,8 @@ export async function exportCurrentPatch(request: ExportRequest = {}): Promise<v
     const tracks: ExportTrack[] = useTracksStore.getState().tracks.map((t) => ({
       synthState: t.synthState,
       pattern: t.pattern,
-      mixer: t.mixer,
+      // A disabled track exports as muted
+      mixer: t.enabled ? t.mixer : { ...t.mixer, mute: true },
     }));
     const blob = await renderMixToWav(tracks, request);
     downloadBlob(blob, exportFilename());

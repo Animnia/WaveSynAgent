@@ -47,6 +47,7 @@ function freshTrack(id: string, name: string) {
     synthState: createDefaultSynthState(),
     pattern: { id: 'main', name: 'Pattern 1', steps: 16 as const, notes: [] },
     mixer: { volume: 0.8, pan: 0, mute: false, solo: false },
+    enabled: true,
     playing: false,
     past: [],
     future: [],
@@ -161,6 +162,30 @@ describe('applyMutationToTrack', () => {
     expect(useTracksStore.getState().applyMutationToTrack(1, 'filter.cutoff', 99999)).toBe(false);
     expect(useTracksStore.getState().applyMutationToTrack(9, 'filter.cutoff', 1000)).toBe(false);
     expect(useTracksStore.getState().tracks[1].synthState.filter.cutoff).toBe(5000);
+  });
+});
+
+describe('track enable/disable', () => {
+  it('toggleTrackEnabled flips the power flag', () => {
+    useTracksStore.getState().toggleTrackEnabled('t2');
+    expect(useTracksStore.getState().tracks[1].enabled).toBe(false);
+    useTracksStore.getState().toggleTrackEnabled('t2');
+    expect(useTracksStore.getState().tracks[1].enabled).toBe(true);
+  });
+
+  it('a disabled track cannot play', async () => {
+    useTracksStore.getState().toggleTrackEnabled('t1');
+    await useTracksStore.getState().playTrack('t1');
+    expect(engineStub.startSequencer).not.toHaveBeenCalled();
+    expect(useTracksStore.getState().tracks[0].playing).toBe(false);
+  });
+
+  it('disabling a playing track stops it', async () => {
+    await useTracksStore.getState().playTrack('t1');
+    expect(useTracksStore.getState().tracks[0].playing).toBe(true);
+    useTracksStore.getState().toggleTrackEnabled('t1');
+    expect(engineStub.stopSequencer).toHaveBeenCalledOnce();
+    expect(useTracksStore.getState().tracks[0].playing).toBe(false);
   });
 });
 
