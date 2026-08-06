@@ -55,6 +55,8 @@ export interface AgentMessage {
   usage?: { prompt: number; completion: number };
   /** Ordered timeline of reasoning / text / tool-call parts. */
   parts?: MessagePart[];
+  /** Autonomous goal checklist (set_goals / update_goal tools). */
+  goals?: { text: string; status: 'pending' | 'in_progress' | 'done' }[];
   /** Plan card proposed by the agent (propose_plan tool). */
   plan?: { title: string; steps: string[] };
   planStatus?: 'pending' | 'confirmed' | 'cancelled';
@@ -629,6 +631,26 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                         : [],
                     };
                     m.planStatus = 'pending';
+                  });
+                  break;
+                case 'goals':
+                  updateAssistant((m) => {
+                    m.goals = Array.isArray(evt.goals)
+                      ? (evt.goals as { text?: unknown; status?: unknown }[]).map((g) => ({
+                          text: String(g.text ?? ''),
+                          status:
+                            g.status === 'in_progress' || g.status === 'done'
+                              ? g.status
+                              : 'pending',
+                        }))
+                      : [];
+                  });
+                  break;
+                case 'goal_update':
+                  updateAssistant((m) => {
+                    const i = Number(evt.index);
+                    const status = evt.status === 'done' ? 'done' : evt.status === 'in_progress' ? 'in_progress' : null;
+                    if (m.goals && status && m.goals[i]) m.goals[i].status = status;
                   });
                   break;
                 case 'preferences':

@@ -571,6 +571,50 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "set_goals",
+            "description": (
+                "Declare an ordered goal list for a COMPLEX multi-step task, then work "
+                "through it autonomously — no user confirmation needed. The goals render "
+                "as a live checklist the user can watch. Use for tasks with 3+ distinct "
+                "steps; skip it for simple one-shot requests."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goals": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 10,
+                        "items": {"type": "string"},
+                        "description": "Ordered goals, each one short line (e.g. 'Design the bass patch on track 2')",
+                    },
+                },
+                "required": ["goals"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_goal",
+            "description": (
+                "Mark progress on the goal list created with set_goals: set a goal "
+                "in_progress when you start it and done when it is finished, then move on "
+                "to the next one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "index": {"type": "integer", "minimum": 0, "description": "0-based goal index"},
+                    "status": {"type": "string", "enum": ["in_progress", "done"]},
+                },
+                "required": ["index", "status"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_plan",
             "description": (
                 "Propose a step-by-step plan to the user BEFORE executing it. The plan is "
@@ -901,6 +945,38 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "result": f"Track mixer updated: { {k: v for k, v in mixer.items() if k != 'track'} }",
                 "mutations": [],
                 "track_mixer": mixer,
+            }
+
+        case "set_goals":
+            raw_goals = arguments.get("goals") or []
+            if not isinstance(raw_goals, list):
+                return {"result": "set_goals requires a 'goals' array", "mutations": []}
+            goals = [
+                {"text": str(g).strip()[:120], "status": "pending"}
+                for g in raw_goals
+                if str(g).strip()
+            ][:10]
+            if len(goals) < 2:
+                return {"result": "set_goals needs at least 2 goals (simple tasks don't need a goal list)", "mutations": []}
+            return {
+                "result": (
+                    f"Goal list set ({len(goals)} goals). Now execute them IN ORDER: "
+                    "update_goal(0, 'in_progress') and start working; mark each done as "
+                    "you finish. Do not wait for user input."
+                ),
+                "mutations": [],
+                "goals": goals,
+            }
+
+        case "update_goal":
+            idx = arguments.get("index")
+            status = arguments.get("status")
+            if status not in ("in_progress", "done") or not isinstance(idx, int) or isinstance(idx, bool) or idx < 0:
+                return {"result": "update_goal requires index>=0 and status in_progress|done", "mutations": []}
+            return {
+                "result": f"Goal {idx} -> {status}.",
+                "mutations": [],
+                "goal_update": {"index": idx, "status": status},
             }
 
         case "propose_plan":

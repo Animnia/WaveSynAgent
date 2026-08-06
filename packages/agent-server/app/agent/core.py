@@ -11,7 +11,18 @@ from ..tools.synth_tools import SYNTH_TOOLS, AnalysisChannel, execute_tool_async
 
 PLAN_MODE_SECTION = """
 ## ⚠️ 计划模式已开启
-用户开启了计划模式。对于任何需要修改参数/音轨的请求，你**必须先调用 propose_plan** 提交分步计划，然后**停下来等待用户确认**（用户会回复「确认执行」或「取消」）。确认后才按计划逐步执行；取消则提出替代方案或结束。纯问答/讲解类请求不需要计划。
+用户开启了**计划模式**。对于需要修改参数/音轨的复杂请求：
+1. 先调用 propose_plan 提交详细计划，然后**停下来等待用户确认**（用户会回复确认或取消）
+2. 确认后进入自主执行：调用 set_goals 把计划落成目标清单，按顺序逐个执行（update_goal 标记 in_progress/done），最后总结交付——中途不再向用户请示
+3. 简单请求（问答/讲解/单步小调整）不需要计划，直接处理
+"""
+
+AUTONOMY_SECTION = """
+## 复杂任务自主拆解（默认模式）
+- 遇到需要多个独立步骤的复杂请求（多轨编排、完整音色设计流程等）：先 set_goals 拆成有序目标清单（2-8 个），然后**自主按顺序执行**——每个目标开始标 in_progress、完成标 done（update_goal），接着做下一个。**全程不要等用户确认**
+- 每完成关键目标可简要验证（如 analyze_audio 听效果），全部完成后总结交付：做了什么、如何验证
+- **简单请求不要拆解**：单步/少量调整直接做，保持轻量。是否拆解由你自主判断
+- 用户说话时再响应；执行任务期间不要停下来问“要不要继续”
 """
 
 # ── History compaction (deterministic, no extra LLM call) ──
@@ -71,6 +82,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - WAV 导出：export_audio 把**所有可听音轨的混音**（尊重 mute/solo）离线渲染成 WAV 并自动下载
 - 音频分析：analyze_audio 播放音符并分析实际输出（响度/削波/明亮度/频段分布），用于验证调音结果
 - **口味记忆**：用户表达稳定偏好时（如“我喜欢暗的音色”“别用太多混响”），调用 update_preferences 记住；偏好会跨会话保留并出现在你的上下文里
+- **目标拆解**：set_goals 为复杂任务建立有序目标清单（用户可见的实时 checklist），update_goal 标记每个目标的进度
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
 
@@ -160,7 +172,7 @@ class AgentSession:
         - Truncates `history` to the last `max_history` messages (preserving order).
         - Appends the new user message with synth state context injected.
         """
-        prompt = SYSTEM_PROMPT + (PLAN_MODE_SECTION if plan_mode else "")
+        prompt = SYSTEM_PROMPT + AUTONOMY_SECTION + (PLAN_MODE_SECTION if plan_mode else "")
         msgs: list[Message] = [Message(role="system", content=prompt)]
 
         # Normalize history -> Message instances
@@ -426,6 +438,12 @@ class AgentSession:
 
                     if "plan" in result:
                         yield {"type": "plan", **result["plan"]}
+
+                    if "goals" in result:
+                        yield {"type": "goals", "goals": result["goals"]}
+
+                    if "goal_update" in result:
+                        yield {"type": "goal_update", **result["goal_update"]}
 
                     if "preferences" in result:
                         yield {"type": "preferences", "preferences": result["preferences"]}

@@ -353,3 +353,30 @@ class TestProposePlan:
         )
         assert len(result["plan"]["title"]) == 60
         assert result["plan"]["steps"] == ["ok", "fine"]
+
+
+class TestGoalTools:
+    def test_set_goals(self, synth_state):
+        result = execute_tool(
+            "set_goals",
+            {"goals": ["设计 bass 音色", "写 bassline", "验证混音"]},
+            synth_state,
+        )
+        assert result["goals"] == [
+            {"text": "设计 bass 音色", "status": "pending"},
+            {"text": "写 bassline", "status": "pending"},
+            {"text": "验证混音", "status": "pending"},
+        ]
+        assert "IN ORDER" in result["result"]
+
+    def test_set_goals_needs_two(self, synth_state):
+        result = execute_tool("set_goals", {"goals": ["只做一件事"]}, synth_state)
+        assert "goals" not in result
+
+    def test_update_goal(self, synth_state):
+        ok = execute_tool("update_goal", {"index": 1, "status": "done"}, synth_state)
+        assert ok["goal_update"] == {"index": 1, "status": "done"}
+        bad = execute_tool("update_goal", {"index": -1, "status": "done"}, synth_state)
+        assert "goal_update" not in bad
+        bad2 = execute_tool("update_goal", {"index": 0, "status": "maybe"}, synth_state)
+        assert "goal_update" not in bad2

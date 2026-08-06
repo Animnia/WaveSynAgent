@@ -461,6 +461,11 @@ function MessageItem({
         </>
       )}
 
+      {/* Autonomous goal checklist (set_goals / update_goal) */}
+      {message.goals && message.goals.length > 0 && (
+        <GoalsCard goals={message.goals} />
+      )}
+
       {/* Plan card (propose_plan tool) */}
       {message.plan && (
         <PlanCard
@@ -494,6 +499,49 @@ function MessageItem({
           <span>Thinking</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function GoalsCard({
+  goals,
+}: {
+  goals: { text: string; status: 'pending' | 'in_progress' | 'done' }[];
+}) {
+  const done = goals.filter((g) => g.status === 'done').length;
+  return (
+    <div className="mt-2 border border-border-default rounded px-3 py-2 bg-bg-tertiary">
+      <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">
+        Goals · {done}/{goals.length}
+      </div>
+      <ul className="space-y-1">
+        {goals.map((g, i) => (
+          <li key={i} className="flex items-start gap-2 text-xs">
+            <span
+              className={`flex-shrink-0 mt-px ${
+                g.status === 'done'
+                  ? 'text-text-primary'
+                  : g.status === 'in_progress'
+                    ? 'text-text-secondary'
+                    : 'text-text-muted/50'
+              }`}
+            >
+              {g.status === 'done' ? '●' : g.status === 'in_progress' ? '◐' : '○'}
+            </span>
+            <span
+              className={
+                g.status === 'done'
+                  ? 'text-text-muted line-through'
+                  : g.status === 'in_progress'
+                    ? 'text-text-primary'
+                    : 'text-text-secondary'
+              }
+            >
+              {g.text}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

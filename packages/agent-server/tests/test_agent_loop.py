@@ -317,3 +317,46 @@ class TestReasoningStream:
         session = AgentSession(provider=provider, synth_state=synth_state)
         events = await collect(session, "hi", history=[])
         assert by_type(events, "reasoning_delta") == []
+
+
+class TestGoalStreaming:
+    @pytest.mark.asyncio
+    async def test_goals_events_stream(self, synth_state):
+        provider = MockProvider(
+            [
+                tool_response("set_goals", {"goals": ["g1", "g2"]}, call_id="c1"),
+                tool_response("update_goal", {"index": 0, "status": "in_progress"}, call_id="c2"),
+                tool_response("update_goal", {"index": 0, "status": "done"}, call_id="c3"),
+                text_response("全部完成"),
+            ]
+        )
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        events = await collect(session, "做个复杂任务", history=[])
+        goals = by_type(events, "goals")
+        assert goals == [{"type": "goals", "goals": [
+            {"text": "g1", "status": "pending"},
+            {"text": "g2", "status": "pending"},
+        ]}]
+        updates = by_type(events, "goal_update")
+        assert updates == [
+            {"type": "goal_update", "index": 0, "status": "in_progress"},
+            {"type": "goal_update", "index": 0, "status": "done"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_autonomy_section_present_by_default(self, synth_state):
+        provider = MockProvider([text_response("ok")])
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        async for _ in session.chat_stream("hi", history=[]):
+            pass
+        system_msg = provider.calls[0][0]
+        assert "自主拆解" in system_msg.content
+
+    @pytest.mark.asyncio
+    async def test_plan_mode_flow_updated(self, synth_state):
+        provider = MockProvider([text_response("ok")])
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        async for _ in session.chat_stream("hi", history=[], plan_mode=True):
+            pass
+        content = provider.calls[0][0].content
+        assert "propose_plan" in content and "set_goals" in content
