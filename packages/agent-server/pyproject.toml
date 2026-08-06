@@ -16,7 +16,7 @@ dependencies = [
     "websockets>=14.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24.0",
@@ -35,8 +35,9 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.uv]
-dev-dependencies = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24.0",
-    "ruff>=0.9.0",
-]
+# Pin the public PyPI as the project index so the lockfile is portable
+# (CI/deploy runners cannot reach internal mirrors; a user-level uv.toml
+# may define one, but project config takes precedence).
+[[tool.uv.index]]
+url = "https://pypi.org/simple"
+default = true
