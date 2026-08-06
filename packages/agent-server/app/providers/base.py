@@ -69,6 +69,8 @@ class LLMProvider(ABC):
         for true token streaming.
         """
         response = await self.chat(messages=messages, tools=tools, temperature=temperature)
+        if response.reasoning_content:
+            yield {"type": "reasoning_delta", "delta": response.reasoning_content}
         if response.content:
             yield {"type": "text_delta", "delta": response.content}
         yield {"type": "done", "response": response}

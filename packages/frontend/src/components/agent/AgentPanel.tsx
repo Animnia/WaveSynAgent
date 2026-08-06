@@ -409,27 +409,56 @@ function MessageItem({
   const hasMutations = message.mutations && message.mutations.length > 0;
   const hasPlays = message.playCommands && message.playCommands.length > 0;
   const hasContent = message.content.length > 0;
+  const parts = message.parts ?? [];
+  const hasParts = parts.length > 0;
 
   return (
     <div className="fade-in">
       <div className="text-[10px] text-text-muted uppercase tracking-wider mb-2">Agent</div>
 
-      {/* Thinking / tool calls */}
-      {(hasThinking || hasMutations || hasPlays) && (
-        <ToolCallSection
-          thinking={message.thinking}
-          mutations={message.mutations}
-          playCommands={message.playCommands}
-          streaming={message.streaming}
-        />
-      )}
-
-      {/* Markdown text */}
-      {hasContent && (
-        <div className="md-content">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-          {message.streaming && <span className="streaming-caret" />}
+      {hasParts ? (
+        /* Chronological timeline: reasoning → text → tool → … in stream order */
+        <div>
+          {parts.map((part, i) => {
+            const isLast = i === parts.length - 1;
+            if (part.kind === 'reasoning') {
+              return (
+                <ReasoningBlock
+                  key={i}
+                  text={part.text}
+                  streaming={!!message.streaming && isLast}
+                />
+              );
+            }
+            if (part.kind === 'tool') {
+              return <ToolChip key={i} tool={part.tool} args={part.args} />;
+            }
+            return (
+              <div key={i} className="md-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+                {message.streaming && isLast && <span className="streaming-caret" />}
+              </div>
+            );
+          })}
         </div>
+      ) : (
+        /* Legacy messages (persisted before the timeline model) */
+        <>
+          {(hasThinking || hasMutations || hasPlays) && (
+            <ToolCallSection
+              thinking={message.thinking}
+              mutations={message.mutations}
+              playCommands={message.playCommands}
+              streaming={message.streaming}
+            />
+          )}
+          {hasContent && (
+            <div className="md-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+              {message.streaming && <span className="streaming-caret" />}
+            </div>
+          )}
+        </>
       )}
 
       {/* Plan card (propose_plan tool) */}
@@ -465,6 +494,60 @@ function MessageItem({
           <span>Thinking</span>
         </div>
       )}
+    </div>
+  );
+}
+
+function ReasoningBlock({ text, streaming }: { text: string; streaming?: boolean }) {
+  // Collapsed by default; expanded view streams live and follows the tail.
+  const [expanded, setExpanded] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (expanded && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    }
+  }, [text, expanded]);
+
+  return (
+    <div className="mb-2 border border-border-default rounded bg-bg-tertiary">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary transition-colors"
+      >
+        <span className="flex items-center gap-2">
+          <span>{expanded ? '▾' : '▸'}</span>
+          <span>Thinking</span>
+          {!expanded && (
+            <span className="normal-case tracking-normal truncate max-w-[220px] text-text-muted/70">
+              {text.slice(-80)}
+            </span>
+          )}
+        </span>
+        {streaming && <span className="streaming-caret" />}
+      </button>
+      {expanded && (
+        <div
+          ref={bodyRef}
+          className="max-h-48 overflow-y-auto border-t border-border-default px-3 py-2 text-[11px] leading-relaxed text-text-muted whitespace-pre-wrap"
+        >
+          {text}
+          {streaming && <span className="streaming-caret" />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolChip({ tool, args }: { tool: string; args: string }) {
+  return (
+    <div className="my-1.5 flex items-center gap-2 font-mono text-[11px] min-w-0">
+      <span className="px-1.5 py-0.5 rounded border border-border-default bg-bg-tertiary text-text-primary flex-shrink-0">
+        {tool}
+      </span>
+      <span className="text-text-muted truncate" title={args}>
+        {args}
+      </span>
     </div>
   );
 }

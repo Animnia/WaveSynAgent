@@ -16,6 +16,23 @@ export interface Mutation {
   track?: number;
 }
 
+/**
+ * Ordered display parts of an assistant message — the chronological
+ * timeline: reasoning blocks, text segments and tool calls interleaved in
+ * the order they streamed in (reasoning → text → tool → reasoning → …).
+ */
+export type MessagePart =
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; tool: string; args: string };
+
+/** Append streamed text to the matching part kind (merge with the tail). */
+export function appendPart(parts: MessagePart[], kind: 'reasoning' | 'text', delta: string): void {
+  const last = parts[parts.length - 1];
+  if (last && last.kind === kind) last.text += delta;
+  else parts.push({ kind, text: delta });
+}
+
 export interface PlayCommand {
   notes: number[];
   velocity: number;
@@ -36,6 +53,8 @@ export interface AgentMessage {
   cancelled?: boolean;
   /** Accumulated token usage reported by the provider. */
   usage?: { prompt: number; completion: number };
+  /** Ordered timeline of reasoning / text / tool-call parts. */
+  parts?: MessagePart[];
   /** Plan card proposed by the agent (propose_plan tool). */
   plan?: { title: string; steps: string[] };
   planStatus?: 'pending' | 'confirmed' | 'cancelled';
@@ -432,6 +451,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             thinking: [],
             mutations: [],
             playCommands: [],
+            parts: [],
             streaming: true,
             timestamp: Date.now(),
           });
@@ -490,7 +510,14 @@ export const useAgentStore = create<AgentState & AgentActions>()(
               switch (evt.type) {
                 case 'thinking':
                   updateAssistant((m) => {
-                    m.thinking!.push({ tool: String(evt.tool), args: String(evt.args) });
+                    const step = { tool: String(evt.tool), args: String(evt.args) };
+                    m.thinking!.push(step);
+                    m.parts!.push({ kind: 'tool', ...step });
+                  });
+                  break;
+                case 'reasoning_delta':
+                  updateAssistant((m) => {
+                    appendPart(m.parts!, 'reasoning', String(evt.delta ?? ''));
                   });
                   break;
                 case 'mutation': {
@@ -516,10 +543,17 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                   break;
                 }
                 case 'text_delta':
-                  updateAssistant((m) => { m.content += String(evt.delta ?? ''); });
+                  updateAssistant((m) => {
+                    const delta = String(evt.delta ?? '');
+                    m.content += delta;
+                    appendPart(m.parts!, 'text', delta);
+                  });
                   break;
                 case 'text':
-                  updateAssistant((m) => { m.content = String(evt.content ?? ''); });
+                  updateAssistant((m) => {
+                    m.content = String(evt.content ?? '');
+                    m.parts = [{ kind: 'text', text: m.content }];
+                  });
                   break;
                 case 'usage':
                   updateAssistant((m) => {

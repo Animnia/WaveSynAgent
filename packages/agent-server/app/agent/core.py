@@ -347,9 +347,13 @@ class AgentSession:
             ):
                 if event["type"] == "text_delta":
                     yield {"type": "text_delta", "delta": event["delta"]}
+                elif event["type"] == "reasoning_delta":
+                    # Reasoning models (e.g. deepseek-v4) stream their chain
+                    # of thought — forward it so the UI can show a live,
+                    # collapsible thinking block.
+                    yield {"type": "reasoning_delta", "delta": event["delta"]}
                 elif event["type"] == "done":
                     response = event["response"]
-                # ignore reasoning_delta for now
 
             if response is None:
                 break

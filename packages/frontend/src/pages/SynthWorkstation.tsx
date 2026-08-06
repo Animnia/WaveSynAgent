@@ -122,31 +122,35 @@ export default function SynthWorkstation() {
           >
             Redo
           </button>
-          {midiSupported && (
-            <Dropdown
-              label={`MIDI${midiEnabled && midiInputs.length > 0 ? ` · ${midiInputs.length}` : ''}`}
-              active={midiEnabled && midiInputs.length > 0}
-              title="MIDI input"
-              items={[
-                {
-                  label: midiEnabled ? 'Disable MIDI input' : 'Enable MIDI input',
-                  onClick: () => setMidiEnabled(!midiEnabled),
-                },
-                { label: 'Inputs', header: true },
-                ...(midiInputs.length > 0
-                  ? midiInputs.map((i) => ({ label: i.name, disabled: true }))
-                  : [{ label: 'No devices detected', disabled: true }]),
-              ]}
-            />
-          )}
           <Dropdown
-            label={exporting ? 'Exporting…' : 'Export'}
-            disabled={exporting}
-            title="Render audio to a WAV file"
+            label={exporting ? 'Exporting…' : 'Tools'}
+            title="MIDI, export, presets"
             items={[
-              { label: 'Export mix — 2 bars', onClick: () => void handleExport() },
-              { label: 'Export mix — 4 bars', onClick: () => void handleExport(4) },
-              { label: 'Export mix — 8 bars', onClick: () => void handleExport(8) },
+              ...(midiSupported
+                ? [
+                    { label: 'MIDI', header: true as const },
+                    {
+                      label: midiEnabled ? 'Disable MIDI input' : 'Enable MIDI input',
+                      onClick: () => setMidiEnabled(!midiEnabled),
+                    },
+                    ...(midiInputs.length > 0
+                      ? midiInputs.map((i) => ({
+                          label: `· ${i.name}`,
+                          disabled: true,
+                        }))
+                      : [{ label: '· No devices detected', disabled: true }]),
+                  ]
+                : []),
+              { label: 'Export WAV', header: true },
+              { label: 'Mix — 2 bars', onClick: () => void handleExport() },
+              { label: 'Mix — 4 bars', onClick: () => void handleExport(4) },
+              { label: 'Mix — 8 bars', onClick: () => void handleExport(8) },
+              { label: 'Presets', header: true },
+              { label: 'Browse presets…', onClick: togglePresetBrowser },
+              {
+                label: 'Save current as preset…',
+                onClick: () => usePresetStore.getState().toggleSaveDialog(),
+              },
             ]}
           />
           <button
@@ -159,17 +163,6 @@ export default function SynthWorkstation() {
           >
             Seq
           </button>
-          <Dropdown
-            label="Presets"
-            title="Preset library"
-            items={[
-              { label: 'Browse presets…', onClick: togglePresetBrowser },
-              {
-                label: 'Save current as preset…',
-                onClick: () => usePresetStore.getState().toggleSaveDialog(),
-              },
-            ]}
-          />
           <button
             className={`px-3 py-1.5 text-xs rounded border transition-colors ${
               agentOpen

@@ -12,6 +12,7 @@ import asyncio
 import pytest
 
 from app.agent.core import AgentSession
+from app.providers.base import LLMResponse
 from tests.conftest import MockProvider, text_response, tool_response
 
 
@@ -293,3 +294,26 @@ class TestPreferences:
         events = await collect(session, "以后 BPM 都 90 左右", history=[])
         prefs = by_type(events, "preferences")
         assert prefs == [{"type": "preferences", "preferences": {"bpm": "90 左右"}}]
+
+
+class TestReasoningStream:
+    @pytest.mark.asyncio
+    async def test_reasoning_delta_forwarded(self, synth_state):
+        """Reasoning models' chain-of-thought streams through to the client."""
+        provider = MockProvider(
+            [LLMResponse(content="答案是 42", reasoning_content="让我想想……", finish_reason="stop")]
+        )
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        events = await collect(session, "思考", history=[])
+        reasoning = by_type(events, "reasoning_delta")
+        assert reasoning == [{"type": "reasoning_delta", "delta": "让我想想……"}]
+        # ordering: reasoning before text
+        types = [e["type"] for e in events]
+        assert types.index("reasoning_delta") < types.index("text_delta")
+
+    @pytest.mark.asyncio
+    async def test_no_reasoning_no_event(self, synth_state):
+        provider = MockProvider([text_response("普通回复")])
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        events = await collect(session, "hi", history=[])
+        assert by_type(events, "reasoning_delta") == []

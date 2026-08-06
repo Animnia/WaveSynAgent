@@ -23,7 +23,7 @@ export default function TrackBar() {
           <div
             key={t.id}
             onClick={() => selectTrack(t.id)}
-            className={`flex items-center gap-2 px-2.5 py-1.5 rounded border cursor-pointer select-none transition-colors min-w-[190px] ${
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded border cursor-pointer select-none transition-colors flex-shrink-0 whitespace-nowrap ${
               isActive
                 ? 'border-border-active bg-bg-tertiary'
                 : 'border-border-default bg-bg-primary hover:border-border-active/50'
@@ -138,7 +138,7 @@ export default function TrackBar() {
       {tracks.length < MAX_TRACKS && (
         <button
           onClick={() => createTrack()}
-          className="px-3 py-1.5 text-xs rounded border border-dashed border-border-default text-text-muted hover:border-border-active hover:text-text-secondary transition-colors min-w-[60px]"
+          className="px-3 py-1.5 text-xs rounded border border-dashed border-border-default text-text-muted hover:border-border-active hover:text-text-secondary transition-colors flex-shrink-0"
         >
           + Track
         </button>
