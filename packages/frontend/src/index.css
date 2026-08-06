@@ -94,6 +94,27 @@ input[type='range']::-moz-range-thumb {
   background: #18181b;
   border: none;
 }
+
+/* Vertical variant (sequencer pitch-range slider) */
+input[type='range'].range-vertical {
+  writing-mode: vertical-lr;
+  direction: rtl; /* max value at the top */
+  width: 14px;
+  height: 180px;
+}
+input[type='range'].range-vertical::-webkit-slider-runnable-track {
+  width: 2px;
+  height: 100%;
+  background: #d4d4d8;
+}
+input[type='range'].range-vertical::-webkit-slider-thumb {
+  margin-top: 0;
+  margin-left: -5px;
+}
+input[type='range'].range-vertical::-moz-range-track {
+  width: 2px;
+  height: 100%;
+}
 ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
 

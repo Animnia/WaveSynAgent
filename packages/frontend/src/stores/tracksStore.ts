@@ -105,6 +105,7 @@ interface TracksActions {
   toggleSequencerPanel: () => void;
   setSequencerPanelOpen: (open: boolean) => void;
   setCurrentStep: (step: number) => void;
+  setSeqBaseNote: (note: number) => void;
   shiftSeqOctave: (direction: 1 | -1) => void;
 }
 
@@ -359,6 +360,10 @@ export const useTracksStore = create<TracksState & TracksActions>()(
         toggleSequencerPanel: () => set((s) => { s.sequencerPanelOpen = !s.sequencerPanelOpen; }),
         setSequencerPanelOpen: (open) => set((s) => { s.sequencerPanelOpen = open; }),
         setCurrentStep: (step) => set((s) => { s.currentStep = step; }),
+        setSeqBaseNote: (note) =>
+          set((s) => {
+            s.seqBaseNote = Math.min(96, Math.max(24, Math.round(note / 12) * 12));
+          }),
         shiftSeqOctave: (direction) =>
           set((s) => {
             s.seqBaseNote = Math.min(96, Math.max(24, s.seqBaseNote + direction * 12));

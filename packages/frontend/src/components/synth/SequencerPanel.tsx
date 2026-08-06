@@ -11,11 +11,11 @@ export default function SequencerPanel() {
   const track = useActiveTrack();
   const currentStep = useTracksStore((s) => s.currentStep);
   const baseNote = useTracksStore((s) => s.seqBaseNote);
+  const setSeqBaseNote = useTracksStore((s) => s.setSeqBaseNote);
   const toggleTrack = useTracksStore((s) => s.toggleTrack);
   const toggleCell = useTracksStore((s) => s.toggleSeqCell);
   const clearPattern = useTracksStore((s) => s.clearSeqPattern);
   const setSteps = useTracksStore((s) => s.setSeqSteps);
-  const shiftOctave = useTracksStore((s) => s.shiftSeqOctave);
 
   if (!track) return null;
   const { pattern, playing, id: trackId } = track;
@@ -58,26 +58,6 @@ export default function SequencerPanel() {
           ))}
         </div>
 
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => shiftOctave(-1)}
-            disabled={baseNote <= 24}
-            className="px-1.5 py-1 text-[10px] bg-bg-tertiary text-text-muted border border-border-default rounded hover:text-text-secondary disabled:opacity-30"
-          >
-            −8ve
-          </button>
-          <span className="text-[10px] text-text-muted w-8 text-center">
-            {midiToNoteName(baseNote)}
-          </span>
-          <button
-            onClick={() => shiftOctave(1)}
-            disabled={baseNote >= 96}
-            className="px-1.5 py-1 text-[10px] bg-bg-tertiary text-text-muted border border-border-default rounded hover:text-text-secondary disabled:opacity-30"
-          >
-            +8ve
-          </button>
-        </div>
-
         <button
           onClick={() => clearPattern(trackId)}
           className="px-2 py-1 text-[10px] bg-bg-tertiary text-text-muted border border-border-default rounded hover:text-accent-red transition-colors"
@@ -91,8 +71,30 @@ export default function SequencerPanel() {
         </span>
       </div>
 
-      {/* Grid */}
-      <div className="overflow-x-auto">
+      {/* Grid + pitch-range slider */}
+      <div className="flex gap-2">
+        {/* Vertical pitch-range slider: drag to shift the grid's octave window */}
+        <div className="flex flex-col items-center flex-shrink-0 select-none">
+          <span className="text-[9px] font-mono text-text-muted mb-1">
+            {midiToNoteName(baseNote + 11)}
+          </span>
+          <input
+            type="range"
+            min={24}
+            max={96}
+            step={12}
+            value={baseNote}
+            onChange={(e) => setSeqBaseNote(parseInt(e.target.value, 10))}
+            className="range-vertical"
+            aria-label="Pitch range"
+            title={`Pitch range (bottom row ${midiToNoteName(baseNote)})`}
+          />
+          <span className="text-[9px] font-mono text-text-muted mt-1">
+            {midiToNoteName(baseNote)}
+          </span>
+        </div>
+
+        <div className="overflow-x-auto flex-1">
         <div
           className="grid gap-[2px]"
           style={{ gridTemplateColumns: `56px repeat(${steps}, minmax(18px, 1fr))` }}
@@ -131,6 +133,7 @@ export default function SequencerPanel() {
               })}
             </Fragment>
           ))}
+        </div>
         </div>
       </div>
     </div>
