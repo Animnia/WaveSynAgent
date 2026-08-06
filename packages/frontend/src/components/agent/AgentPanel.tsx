@@ -141,6 +141,7 @@ export default function AgentPanel() {
         patternNotes: t.pattern.notes.length,
       })),
       activeTrack: Math.max(0, activeIndex),
+      preferences: useAgentStore.getState().preferences,
     }) as typeof synthState;
     await streamMessage(msg, statePayload, {
       onMutation: applyMutation,
@@ -445,10 +446,15 @@ function MessageItem({
       {message.cancelled && (
         <div className="mt-1 text-[10px] text-text-muted">■ 已停止</div>
       )}
-      {message.usage && (message.usage.prompt + message.usage.completion > 0) && (
+      {(message.usage || message.turnMs !== undefined) && (
         <div className="mt-1 text-[10px] text-text-muted">
-          tokens {message.usage.prompt + message.usage.completion}
-          （输入 {message.usage.prompt} / 输出 {message.usage.completion}）
+          {!!message.usage && message.usage.prompt + message.usage.completion > 0 && (
+            <span>
+              tokens {message.usage.prompt + message.usage.completion}
+              （输入 {message.usage.prompt} / 输出 {message.usage.completion}）
+            </span>
+          )}
+          {message.turnMs !== undefined && <span> 耗时 {(message.turnMs / 1000).toFixed(1)}s</span>}
         </div>
       )}
 

@@ -39,6 +39,8 @@ export interface AgentMessage {
   /** Plan card proposed by the agent (propose_plan tool). */
   plan?: { title: string; steps: string[] };
   planStatus?: 'pending' | 'confirmed' | 'cancelled';
+  /** Wall-clock duration of this turn (ms), set on completion. */
+  turnMs?: number;
   timestamp: number;
 }
 
@@ -61,6 +63,8 @@ interface AgentState {
   historyDrawerOpen: boolean;
   /** Plan mode: the agent must propose a plan and wait for confirmation. */
   planMode: boolean;
+  /** Durable user taste memory (update_preferences tool), persisted. */
+  preferences: Record<string, string>;
 }
 
 export interface AnalyzeRequest {
@@ -284,6 +288,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
       panelOpen: false,
       historyDrawerOpen: false,
       planMode: false,
+      preferences: {},
 
       togglePanel: () => set((s) => { s.panelOpen = !s.panelOpen; }),
       toggleHistoryDrawer: () => set((s) => { s.historyDrawerOpen = !s.historyDrawerOpen; }),
@@ -395,10 +400,21 @@ export const useAgentStore = create<AgentState & AgentActions>()(
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .filter((m) => m.content && m.content.length > 0)
           .slice(-HISTORY_LIMIT)
-          .map((m) => ({ role: m.role, content: m.content }));
+          .map((m) => {
+            // Annotate assistant turns with the actions taken — gives the
+            // model (and the server-side history compactor) visibility into
+            // what was DONE, not just what was said.
+            if (m.role === 'assistant' && m.mutations?.length) {
+              const paths = m.mutations.map((mut) => mut.path);
+              const brief = paths.slice(0, 8).join(', ') + (paths.length > 8 ? ' …' : '');
+              return { role: m.role, content: `${m.content}\n[执行的操作: ${brief}]` };
+            }
+            return { role: m.role, content: m.content };
+          });
 
         const userId = crypto.randomUUID();
         const assistantId = crypto.randomUUID();
+        const turnStart = Date.now();
 
         set((s) => {
           const sess = s.sessions[activeId];
@@ -581,6 +597,18 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                     m.planStatus = 'pending';
                   });
                   break;
+                case 'preferences':
+                  set((s) => {
+                    const patch = evt.preferences;
+                    if (!patch || typeof patch !== 'object') return;
+                    for (const [k, v] of Object.entries(patch as Record<string, unknown>)) {
+                      const key = String(k).slice(0, 40);
+                      const val = String(v).slice(0, 120);
+                      if (val) s.preferences[key] = val;
+                      else delete s.preferences[key]; // empty value = forget
+                    }
+                  });
+                  break;
                 case 'analyze_request': {
                   // The agent asked us to be its ears: play notes, analyze,
                   // and relay the features back over the same socket.
@@ -621,6 +649,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                   finish();
                   break;
                 case 'done':
+                  updateAssistant((m) => { m.turnMs = Date.now() - turnStart; });
                   finish();
                   break;
                 // 'pong' and unknown types are ignored
@@ -667,6 +696,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
         activeSessionId: s.activeSessionId,
         provider: s.provider,
         planMode: s.planMode,
+        preferences: s.preferences,
       }),
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as object) } as AgentState & AgentActions;

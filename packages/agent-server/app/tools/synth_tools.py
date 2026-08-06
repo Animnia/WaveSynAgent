@@ -597,6 +597,29 @@ SYNTH_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "update_preferences",
+            "description": (
+                "Remember durable user preferences (taste memory). Call when the user states "
+                "a stable preference ('我喜欢暗一点的音色', '以后 BPM 都在 90 左右', "
+                "'别用太多混响'). Keys are short snake_case labels, values short strings. "
+                "Preferences persist across sessions and appear in your context as 用户偏好."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "preferences": {
+                        "type": "object",
+                        "description": "key→value patch, e.g. {\"brightness\": \"偏暗\", \"reverb_usage\": \"少量\"}. Set a value to empty string to forget it.",
+                        "additionalProperties": {"type": "string"},
+                    },
+                },
+                "required": ["preferences"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "explain_concept",
             "description": "Explain a music production or synthesis concept to the user. Use this when teaching.",
             "parameters": {
@@ -897,6 +920,24 @@ def execute_tool(tool_name: str, arguments: dict[str, Any], synth_state: dict[st
                 "plan": {"title": title, "steps": steps},
             }
 
+        case "update_preferences":
+            prefs = arguments.get("preferences")
+            if not isinstance(prefs, dict) or not prefs:
+                return {"result": "update_preferences requires a 'preferences' object", "mutations": []}
+            clean: dict[str, str] = {}
+            for k, v in prefs.items():
+                key = str(k).strip()[:40]
+                if not key:
+                    continue
+                clean[key] = str(v).strip()[:120]
+            if not clean:
+                return {"result": "no usable preference entries", "mutations": []}
+            return {
+                "result": f"Preferences updated: {clean}",
+                "mutations": [],
+                "preferences": clean,
+            }
+
         case "explain_concept":
             # The LLM's text response IS the explanation; we just pass through
             return {"result": f"[Explaining: {arguments.get('topic', '?')}]", "mutations": []}
@@ -1177,6 +1218,11 @@ def _format_state(state: dict) -> str:
             )
             if brief:
                 lines.append(f"  notes: {brief}{' …' if len(notes) > 16 else ''}")
+
+    prefs = state.get("preferences")
+    if isinstance(prefs, dict) and prefs:
+        items = "; ".join(f"{k}={v}" for k, v in list(prefs.items())[:12])
+        lines.append(f"用户偏好: {items}")
 
     tracks = state.get("tracks")
     if isinstance(tracks, list) and tracks:

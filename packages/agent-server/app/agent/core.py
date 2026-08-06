@@ -14,6 +14,47 @@ PLAN_MODE_SECTION = """
 用户开启了计划模式。对于任何需要修改参数/音轨的请求，你**必须先调用 propose_plan** 提交分步计划，然后**停下来等待用户确认**（用户会回复「确认执行」或「取消」）。确认后才按计划逐步执行；取消则提出替代方案或结束。纯问答/讲解类请求不需要计划。
 """
 
+# ── History compaction (deterministic, no extra LLM call) ──
+# When the conversation grows long, the oldest messages are folded into a
+# plain-text digest. The frontend annotates assistant turns with an
+# `[执行的操作: ...]` line, so the digest retains what was DONE, not just
+# what was said.
+COMPACT_KEEP_RECENT = 24  # messages kept verbatim at the tail
+COMPACT_MIN_OLD = 8  # don't bother compacting fewer old messages than this
+COMPACT_MAX_CHARS = 2000
+
+
+def _compact_history(messages: list[Message]) -> list[Message]:
+    """Fold the oldest history messages into a deterministic text digest."""
+    if len(messages) <= COMPACT_KEEP_RECENT + COMPACT_MIN_OLD:
+        return messages
+    old, recent = messages[:-COMPACT_KEEP_RECENT], messages[-COMPACT_KEEP_RECENT:]
+
+    lines: list[str] = []
+    for m in old:
+        text = (m.content or "").split("\n\n[当前合成器状态]")[0].strip()
+        if not text:
+            continue
+        text = " ".join(text.split())  # collapse whitespace/newlines
+        label = "用户" if m.role == "user" else "助手"
+        lines.append(f"{label}: {text[:140]}")
+    # Cap the digest size, dropping the oldest lines first
+    digest_lines: list[str] = []
+    total = 0
+    for line in reversed(lines):
+        if total + len(line) > COMPACT_MAX_CHARS:
+            break
+        digest_lines.insert(0, line)
+        total += len(line)
+
+    digest = (
+        f"[早前对话摘要 — 已压缩 {len(old)} 条消息]\n"
+        + "\n".join(digest_lines)
+        + "\n[摘要结束，以下为最近对话原文]"
+    )
+    return [Message(role="user", content=digest), *recent]
+
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 助手。你同时是专业的制作人、音色设计师和音乐教师。
@@ -29,6 +70,7 @@ SYSTEM_PROMPT = """你是 WaveSynAgent —— 一个专业的音乐合成器 AI 
 - **多轨制作**：create_track 新建独立音轨（最多 8 轨，各自独立音色+pattern+混音）/ select_track 切换活动轨 / set_track_mixer 调音轨电平、声像、静音、solo。set_params / sequence_pattern / sequencer_control 均可带 track_index 指定目标轨（省略=活动轨）
 - WAV 导出：export_audio 把**所有可听音轨的混音**（尊重 mute/solo）离线渲染成 WAV 并自动下载
 - 音频分析：analyze_audio 播放音符并分析实际输出（响度/削波/明亮度/频段分布），用于验证调音结果
+- **口味记忆**：用户表达稳定偏好时（如“我喜欢暗的音色”“别用太多混响”），调用 update_preferences 记住；偏好会跨会话保留并出现在你的上下文里
 - 解释合成器概念和音乐理论
 - 根据用户描述创建音色（如"温暖的pad"、"尖锐的lead"、"沉重的bass"）
 
@@ -140,6 +182,8 @@ class AgentSession:
 
         if max_history and len(normalized) > max_history:
             normalized = normalized[-max_history:]
+
+        normalized = _compact_history(normalized)
 
         msgs.extend(normalized)
 
@@ -378,6 +422,9 @@ class AgentSession:
 
                     if "plan" in result:
                         yield {"type": "plan", **result["plan"]}
+
+                    if "preferences" in result:
+                        yield {"type": "preferences", "preferences": result["preferences"]}
 
                     if "create_track" in result:
                         yield {"type": "create_track", **result["create_track"]}

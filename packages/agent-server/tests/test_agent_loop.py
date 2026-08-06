@@ -206,3 +206,90 @@ class TestPlanMode:
             pass
         system_msg = provider.calls[0][0]
         assert "计划模式" not in system_msg.content
+
+
+class TestHistoryCompaction:
+    def test_short_history_untouched(self):
+        from app.agent.core import AgentSession
+        from app.providers.base import Message
+
+        hist = [{"role": "user", "content": f"消息 {i}"} for i in range(10)]
+        msgs = AgentSession.build_messages(hist, "新消息")
+        # system + 10 history + new user message
+        assert len(msgs) == 12
+        assert msgs[1].content == "消息 0"
+
+    def test_long_history_compacted(self):
+        from app.agent.core import AgentSession
+
+        hist = [{"role": "user", "content": f"早期消息 {i}"} for i in range(30)]
+        hist += [{"role": "assistant", "content": f"早期回复 {i}\n[执行的操作: set_params]"} for i in range(10)]
+        hist += [{"role": "user", "content": f"最近消息 {i}"} for i in range(24)]
+        msgs = AgentSession.build_messages(hist, "新消息")
+        # system + digest + 24 recent + new message
+        assert len(msgs) == 27
+        digest = msgs[1]
+        assert "早前对话摘要" in digest.content
+        assert "早期消息 29" in digest.content  # newest old message survives
+        assert "[执行的操作" in digest.content  # action annotations preserved
+        # recent 24 verbatim
+        assert msgs[2].content == "最近消息 0"
+        assert msgs[25].content == "最近消息 23"
+        # state context appended to the NEW message only
+        assert "[当前合成器状态]" not in digest.content
+
+    def test_digest_strips_injected_state(self):
+        from app.agent.core import AgentSession
+
+        hist = [
+            {"role": "user", "content": "调暗一点\n\n[当前合成器状态]\nFilter: cutoff=800"}
+        ] * 40
+        msgs = AgentSession.build_messages(hist, "新消息")
+        digest = msgs[1]
+        assert "早前对话摘要" in digest.content
+        assert "cutoff=800" not in digest.content  # state injection stripped
+        assert "调暗一点" in digest.content
+
+
+class TestPreferences:
+    def test_update_preferences_tool(self, synth_state):
+        from app.tools.synth_tools import execute_tool
+
+        result = execute_tool(
+            "update_preferences",
+            {"preferences": {"brightness": "偏暗", "reverb_usage": "少量"}},
+            synth_state,
+        )
+        assert result["preferences"] == {"brightness": "偏暗", "reverb_usage": "少量"}
+
+    def test_update_preferences_sanitizes(self, synth_state):
+        from app.tools.synth_tools import execute_tool
+
+        result = execute_tool("update_preferences", {"preferences": {}}, synth_state)
+        assert "preferences" not in result
+        long_key = "k" * 100
+        result = execute_tool(
+            "update_preferences", {"preferences": {long_key: "v" * 200}}, synth_state
+        )
+        key = next(iter(result["preferences"]))
+        assert len(key) == 40
+        assert len(result["preferences"][key]) == 120
+
+    def test_preferences_rendered_in_state(self, synth_state):
+        from app.tools.synth_tools import _format_state
+
+        state = {**synth_state, "preferences": {"brightness": "偏暗"}}
+        assert "用户偏好: brightness=偏暗" in _format_state(state)
+
+    @pytest.mark.asyncio
+    async def test_preferences_event_streams(self, synth_state):
+        provider = MockProvider(
+            [
+                tool_response("update_preferences", {"preferences": {"bpm": "90 左右"}}),
+                text_response("记住了"),
+            ]
+        )
+        session = AgentSession(provider=provider, synth_state=synth_state)
+        events = await collect(session, "以后 BPM 都 90 左右", history=[])
+        prefs = by_type(events, "preferences")
+        assert prefs == [{"type": "preferences", "preferences": {"bpm": "90 左右"}}]
