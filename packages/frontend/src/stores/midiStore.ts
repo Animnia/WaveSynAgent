@@ -79,7 +79,7 @@ export const useMidiStore = create<MidiState & MidiActions>()(
 
     init: async () => {
       if (!isMidiSupported()) {
-        set((s) => { s.error = '此浏览器不支持 Web MIDI（推荐 Chrome/Edge）'; });
+        set((s) => { s.error = 'Web MIDI is not supported in this browser (try Chrome/Edge)'; });
         return;
       }
       try {
@@ -93,7 +93,7 @@ export const useMidiStore = create<MidiState & MidiActions>()(
           s.error = null;
         });
       } catch {
-        set((s) => { s.error = 'MIDI 访问被拒绝'; });
+        set((s) => { s.error = 'MIDI access denied'; });
       }
     },
 

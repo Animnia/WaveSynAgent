@@ -29,17 +29,18 @@ export default function TrackBar() {
                 : 'border-border-default bg-bg-primary hover:border-border-active/50'
             }`}
           >
-            {/* Color dot + name */}
+            {/* Status dot (monochrome — filled when the track is playing) */}
             <span
-              className="w-2 h-2 rounded-full flex-shrink-0"
-              style={{ background: t.color, boxShadow: isActive ? `0 0 6px ${t.color}` : 'none' }}
+              className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                t.playing ? 'bg-text-primary' : 'border border-text-muted'
+              }`}
             />
             <input
               value={t.name}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => renameTrack(t.id, e.target.value)}
               className="w-16 bg-transparent text-[11px] text-text-primary outline-none border-b border-transparent focus:border-border-active"
-              title={`Track ${i + 1}（点击改名）`}
+              title={`Track ${i + 1} (click to rename)`}
             />
 
             {/* Play */}
@@ -49,7 +50,7 @@ export default function TrackBar() {
                 void toggleTrack(t.id);
               }}
               disabled={t.pattern.notes.length === 0 && !t.playing}
-              title={t.pattern.notes.length === 0 ? '（无 pattern）' : '播放/停止该轨序列'}
+              title={t.pattern.notes.length === 0 ? '(no pattern)' : 'Play/stop this track\'s sequencer'}
               className={`text-[10px] w-5 h-5 rounded border transition-colors disabled:opacity-25 ${
                 t.playing
                   ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
@@ -97,7 +98,7 @@ export default function TrackBar() {
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setMixerParams(t.id, { volume: parseFloat(e.target.value) })}
               className="w-12"
-              title={`音量 ${(t.mixer.volume * 100).toFixed(0)}%`}
+              title={`Volume ${(t.mixer.volume * 100).toFixed(0)}%`}
             />
 
             {/* Mini pan */}
@@ -114,7 +115,7 @@ export default function TrackBar() {
                 setMixerParams(t.id, { pan: 0 });
               }}
               className="w-10"
-              title={`声像 ${t.mixer.pan.toFixed(2)}（双击回中）`}
+              title={`Pan ${t.mixer.pan.toFixed(2)} (double-click to center)`}
             />
 
             {/* Delete */}
@@ -125,7 +126,7 @@ export default function TrackBar() {
                   deleteTrack(t.id);
                 }}
                 className="text-text-muted hover:text-accent-red text-[10px] px-0.5"
-                aria-label={`删除 ${t.name}`}
+                aria-label={`Delete ${t.name}`}
               >
                 ✕
               </button>
@@ -139,7 +140,7 @@ export default function TrackBar() {
           onClick={() => createTrack()}
           className="px-3 py-1.5 text-xs rounded border border-dashed border-border-default text-text-muted hover:border-border-active hover:text-text-secondary transition-colors min-w-[60px]"
         >
-          + 轨道
+          + Track
         </button>
       )}
     </div>

@@ -2,7 +2,6 @@ import { useState, useRef } from 'react';
 import { usePresetStore } from '@/stores/presetStore';
 import { useSynthStore } from '@/stores/synthStore';
 import type { PresetEntry } from '@/stores/presetStore';
-import SavePresetDialog from './SavePresetDialog';
 
 export default function PresetBrowser() {
   const open = usePresetStore((s) => s.browserOpen);
@@ -55,9 +54,9 @@ export default function PresetBrowser() {
       try {
         const json = JSON.parse(reader.result as string);
         const id = importPreset(json);
-        if (!id) alert('导入失败：JSON 格式不正确');
+        if (!id) alert('Import failed: invalid preset JSON');
       } catch {
-        alert('导入失败：无法解析 JSON');
+        alert('Import failed: could not parse JSON');
       }
     };
     reader.readAsText(file);
@@ -73,7 +72,7 @@ export default function PresetBrowser() {
             <button
               onClick={toggle}
               className="text-text-muted hover:text-text-primary p-1 leading-none"
-              aria-label="关闭"
+              aria-label="Close"
             >
               ✕
             </button>
@@ -82,7 +81,7 @@ export default function PresetBrowser() {
           <div className="px-4 py-3 border-b border-border-default flex items-center gap-2">
             <input
               type="text"
-              placeholder="搜索预设..."
+              placeholder="Search presets..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               className="flex-1 bg-bg-tertiary border border-border-default px-3 py-1.5 text-xs text-text-primary outline-none focus:border-border-active rounded"
@@ -91,14 +90,14 @@ export default function PresetBrowser() {
               onClick={toggleSave}
               className="px-3 py-1.5 text-xs bg-text-primary text-bg-tertiary hover:bg-text-secondary rounded transition-colors"
             >
-              💾 Save
+              Save
             </button>
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-3 py-1.5 text-xs text-text-secondary border border-border-default hover:border-border-active rounded transition-colors"
-              title="导入 JSON"
+              title="Import preset JSON"
             >
-              ⬆ Import
+              Import
             </button>
             <input
               ref={fileInputRef}
@@ -123,7 +122,7 @@ export default function PresetBrowser() {
                     onLoad={() => handleLoad(p)}
                     onRename={(n) => renamePreset(p.id, n)}
                     onDelete={() => {
-                      if (confirm(`删除预设 "${p.name}"？`)) deletePreset(p.id);
+                      if (confirm(`Delete preset "${p.name}"?`)) deletePreset(p.id);
                     }}
                     onExport={() => handleExport(p)}
                   />
@@ -140,13 +139,12 @@ export default function PresetBrowser() {
                 />
               ))}
               {factory.length === 0 && (
-                <div className="text-text-muted text-xs px-2">无工厂预设</div>
+                <div className="text-text-muted text-xs px-2">No factory presets</div>
               )}
             </Section>
           </div>
         </div>
       </div>
-      <SavePresetDialog />
     </>
   );
 }
@@ -220,25 +218,25 @@ function PresetRow({
           <button
             onClick={(e) => { e.stopPropagation(); setDraft(preset.name); setEditing(true); }}
             className="text-text-muted hover:text-text-primary p-1 text-[11px]"
-            title="重命名"
+            title="Rename"
           >
-            ✎
+            Edit
           </button>
         )}
         <button
           onClick={(e) => { e.stopPropagation(); onExport(); }}
           className="text-text-muted hover:text-text-primary p-1 text-[11px]"
-          title="导出 JSON"
+          title="Export JSON"
         >
-          ⬇
+          JSON
         </button>
         {onDelete && (
           <button
             onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="text-text-muted hover:text-accent-red p-1 text-[11px]"
-            title="删除"
+            title="Delete"
           >
-            🗑
+            ✕
           </button>
         )}
       </div>

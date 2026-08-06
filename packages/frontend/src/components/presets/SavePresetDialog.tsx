@@ -30,7 +30,7 @@ export default function SavePresetDialog() {
 
     const existing = findByName(n);
     if (existing) {
-      const ok = confirm(`已存在同名预设 "${n}"。是否覆盖？\n点击取消可改名后再保存。`);
+      const ok = confirm(`A preset named "${n}" already exists. Overwrite it?\nClick Cancel to go back and pick a different name.`);
       if (!ok) return;
       overwritePreset(existing.id, synthState);
     } else {
@@ -49,7 +49,7 @@ export default function SavePresetDialog() {
             <button
               onClick={toggle}
               className="text-text-muted hover:text-text-primary p-1 leading-none"
-              aria-label="关闭"
+              aria-label="Close"
             >
               ✕
             </button>
@@ -70,7 +70,7 @@ export default function SavePresetDialog() {
             </div>
             <div>
               <label className="block text-[10px] uppercase tracking-wider text-text-muted mb-1">
-                Tags (逗号分隔，可选)
+                Tags (comma-separated, optional)
               </label>
               <input
                 value={tags}
@@ -85,14 +85,14 @@ export default function SavePresetDialog() {
               onClick={toggle}
               className="px-3 py-1.5 text-xs text-text-secondary border border-border-default hover:border-border-active rounded transition-colors"
             >
-              取消
+              Cancel
             </button>
             <button
               onClick={handleSave}
               disabled={!name.trim()}
               className="px-4 py-1.5 text-xs bg-text-primary text-bg-tertiary hover:bg-text-secondary disabled:opacity-30 disabled:cursor-not-allowed rounded transition-colors"
             >
-              保存
+              Save
             </button>
           </div>
         </div>

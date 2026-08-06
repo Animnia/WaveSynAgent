@@ -407,7 +407,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             if (m.role === 'assistant' && m.mutations?.length) {
               const paths = m.mutations.map((mut) => mut.path);
               const brief = paths.slice(0, 8).join(', ') + (paths.length > 8 ? ' …' : '');
-              return { role: m.role, content: `${m.content}\n[执行的操作: ${brief}]` };
+              return { role: m.role, content: `${m.content}\n[Actions: ${brief}]` };
             }
             return { role: m.role, content: m.content };
           });
@@ -476,7 +476,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
             if (Date.now() - lastEventAt > TURN_WATCHDOG_MS) {
               updateAssistant((m) => {
                 m.role = 'system';
-                m.content = (m.content ? m.content + '\n\n' : '') + '⚠️ Agent 响应超时，请重试。';
+                m.content = (m.content ? m.content + '\n\n' : '') + 'Agent response timed out. Please try again.';
               });
               finish();
             }
@@ -589,7 +589,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                 case 'plan':
                   updateAssistant((m) => {
                     m.plan = {
-                      title: typeof evt.title === 'string' ? evt.title : '计划',
+                      title: typeof evt.title === 'string' ? evt.title : 'Plan',
                       steps: Array.isArray(evt.steps)
                         ? (evt.steps as unknown[]).map(String).slice(0, 12)
                         : [],
@@ -632,13 +632,13 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                   break;
                 }
                 case 'error': {
-                  const msg = String(evt.message || '未知错误');
+                  const msg = String(evt.message || 'Unknown error');
                   updateAssistant((m) => {
                     if (!m.content) {
                       m.role = 'system';
-                      m.content = `Agent 错误：${msg}`;
+                      m.content = `Agent error: ${msg}`;
                     } else {
-                      m.content += `\n\n⚠️ ${msg}`;
+                      m.content += `\n\n${msg}`;
                     }
                   });
                   finish();
@@ -661,7 +661,7 @@ export const useAgentStore = create<AgentState & AgentActions>()(
                 m.role = 'system';
                 m.content =
                   (m.content ? m.content + '\n\n' : '') +
-                  '⚠️ 与 Agent 服务的连接中断，请重试。';
+                  'Connection to the agent service was lost. Please try again.';
               });
               finish();
             },

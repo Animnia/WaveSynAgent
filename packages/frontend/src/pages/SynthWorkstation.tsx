@@ -20,6 +20,8 @@ import TrackBar from '@/components/synth/TrackBar';
 import { useTracksStore } from '@/stores/tracksStore';
 import { useMidiStore } from '@/stores/midiStore';
 import { exportCurrentPatch } from '@/utils/export';
+import Dropdown from '@/components/common/Dropdown';
+import SavePresetDialog from '@/components/presets/SavePresetDialog';
 
 export default function SynthWorkstation() {
   const synthState = useSynthStore((s) => s.state);
@@ -31,9 +33,6 @@ export default function SynthWorkstation() {
   const canUndo = useSynthStore((s) => s.past.length > 0);
   const canRedo = useSynthStore((s) => s.future.length > 0);
   const sequencerOpen = useTracksStore((s) => s.sequencerPanelOpen);
-  const sequencerPlaying = useTracksStore(
-    (s) => s.tracks.find((t) => t.id === s.activeTrackId)?.playing ?? false,
-  );
   const toggleSequencer = useTracksStore((s) => s.toggleSequencerPanel);
   const midiSupported = useMidiStore((s) => s.supported);
   const midiEnabled = useMidiStore((s) => s.enabled);
@@ -47,10 +46,10 @@ export default function SynthWorkstation() {
     if (midiSupported) void midiInit();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleExport = async () => {
+  const handleExport = async (bars?: number) => {
     setExporting(true);
     try {
-      await exportCurrentPatch();
+      await exportCurrentPatch(bars ? { bars } : {});
     } catch (err) {
       console.error('Export failed:', err);
     } finally {
@@ -110,60 +109,67 @@ export default function SynthWorkstation() {
           <button
             onClick={undo}
             disabled={!canUndo}
-            title="撤销 (Ctrl+Z)"
+            title="Undo (Ctrl+Z)"
             className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            ↩ Undo
+            Undo
           </button>
           <button
             onClick={redo}
             disabled={!canRedo}
-            title="重做 (Ctrl+Shift+Z / Ctrl+Y)"
+            title="Redo (Ctrl+Shift+Z / Ctrl+Y)"
             className="px-2 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           >
-            ↪ Redo
+            Redo
           </button>
           {midiSupported && (
-            <button
-              onClick={() => setMidiEnabled(!midiEnabled)}
-              title={
-                midiInputs.length > 0
-                  ? `MIDI 输入: ${midiInputs.map((i) => i.name).join(', ')}`
-                  : 'MIDI 已启用，未检测到设备'
-              }
-              className={`px-3 py-1.5 text-xs rounded border transition-colors ${
-                midiEnabled && midiInputs.length > 0
-                  ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
-                  : 'bg-bg-tertiary text-text-secondary border-border-default hover:border-border-active'
-              }`}
-            >
-              MIDI{midiInputs.length > 0 ? `:${midiInputs.length}` : ''}
-            </button>
+            <Dropdown
+              label={`MIDI${midiEnabled && midiInputs.length > 0 ? ` · ${midiInputs.length}` : ''}`}
+              active={midiEnabled && midiInputs.length > 0}
+              title="MIDI input"
+              items={[
+                {
+                  label: midiEnabled ? 'Disable MIDI input' : 'Enable MIDI input',
+                  onClick: () => setMidiEnabled(!midiEnabled),
+                },
+                { label: 'Inputs', header: true },
+                ...(midiInputs.length > 0
+                  ? midiInputs.map((i) => ({ label: i.name, disabled: true }))
+                  : [{ label: 'No devices detected', disabled: true }]),
+              ]}
+            />
           )}
-          <button
-            onClick={() => void handleExport()}
+          <Dropdown
+            label={exporting ? 'Exporting…' : 'Export'}
             disabled={exporting}
-            title="将当前音色（或序列器 loop）渲染为 WAV 并下载"
-            className="px-3 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors disabled:opacity-30"
-          >
-            {exporting ? '⏺ Rendering…' : '⬇ Export'}
-          </button>
+            title="Render audio to a WAV file"
+            items={[
+              { label: 'Export mix — 2 bars', onClick: () => void handleExport() },
+              { label: 'Export mix — 4 bars', onClick: () => void handleExport(4) },
+              { label: 'Export mix — 8 bars', onClick: () => void handleExport(8) },
+            ]}
+          />
           <button
             onClick={toggleSequencer}
             className={`px-3 py-1.5 text-xs rounded border transition-colors ${
               sequencerOpen
-                ? 'bg-accent-cyan/20 text-accent-cyan border-accent-cyan/50'
+                ? 'bg-text-primary/10 text-text-primary border-border-active'
                 : 'bg-bg-tertiary text-text-secondary border-border-default hover:border-border-active'
             }`}
           >
-            {sequencerPlaying ? '◉ ' : ''}Seq
+            Seq
           </button>
-          <button
-            onClick={togglePresetBrowser}
-            className="px-3 py-1.5 text-xs bg-bg-tertiary text-text-secondary rounded border border-border-default hover:border-border-active transition-colors"
-          >
-            Presets
-          </button>
+          <Dropdown
+            label="Presets"
+            title="Preset library"
+            items={[
+              { label: 'Browse presets…', onClick: togglePresetBrowser },
+              {
+                label: 'Save current as preset…',
+                onClick: () => usePresetStore.getState().toggleSaveDialog(),
+              },
+            ]}
+          />
           <button
             className={`px-3 py-1.5 text-xs rounded border transition-colors ${
               agentOpen
@@ -246,6 +252,8 @@ export default function SynthWorkstation() {
 
       {/* Modal: Preset browser */}
       <PresetBrowser />
+      {/* Save dialog lives at page level so the header Presets menu can open it */}
+      <SavePresetDialog />
     </div>
   );
 }

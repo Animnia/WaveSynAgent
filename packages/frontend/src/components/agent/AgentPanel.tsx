@@ -106,8 +106,8 @@ export default function AgentPanel() {
     useAgentStore.getState().setPlanStatus(messageId, confirmed ? 'confirmed' : 'cancelled');
     await sendToAgent(
       confirmed
-        ? `确认执行计划「${plan.title}」，请按步骤执行。`
-        : `取消计划「${plan.title}」。`,
+        ? `Plan confirmed: "${plan.title}". Please execute it step by step.`
+        : `Plan cancelled: "${plan.title}".`,
     );
   };
 
@@ -242,14 +242,14 @@ export default function AgentPanel() {
           <button
             onClick={() => createSession()}
             className="text-[10px] px-2 py-1 text-text-muted hover:text-text-primary border border-border-default hover:border-border-active transition-colors"
-            title="新建对话"
+            title="New conversation"
           >
             + NEW
           </button>
           <button
             onClick={toggleHistoryDrawer}
             className="text-[10px] px-2 py-1 text-text-muted hover:text-text-primary border border-border-default hover:border-border-active transition-colors"
-            title="对话历史"
+            title="Conversation history"
           >
             ≡ HISTORY
           </button>
@@ -260,21 +260,21 @@ export default function AgentPanel() {
                 ? 'text-accent-orange border-accent-orange/50 bg-accent-orange/10'
                 : 'text-text-muted border-border-default hover:text-text-primary hover:border-border-active'
             }`}
-            title={planMode ? '计划模式已开启：改动前需先确认计划' : '开启计划模式：改动前需先确认计划'}
+            title={planMode ? 'Plan mode ON: the agent proposes a plan before making changes' : 'Enable plan mode: the agent must propose a plan before making changes'}
           >
-            {planMode ? '📋 PLAN ✓' : '📋 PLAN'}
+            {planMode ? 'PLAN ON' : 'PLAN'}
           </button>
           <button
             onClick={clearActiveSession}
             className="text-[10px] px-2 py-1 text-text-muted hover:text-text-primary border border-border-default hover:border-border-active transition-colors"
-            title="清空当前对话"
+            title="Clear current conversation"
           >
             CLEAR
           </button>
           <button
             onClick={togglePanel}
             className="text-text-muted hover:text-text-primary p-1 leading-none"
-            aria-label="关闭"
+            aria-label="Close"
           >
             ✕
           </button>
@@ -320,11 +320,11 @@ export default function AgentPanel() {
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && (
           <div className="text-text-muted text-xs">
-            <p className="mb-3 uppercase tracking-wider text-[10px]">建议</p>
-            <QuickPrompt onClick={setInput}>帮我做一个温暖的 Pad 音色</QuickPrompt>
-            <QuickPrompt onClick={setInput}>当前音色太尖了，调柔和一些</QuickPrompt>
-            <QuickPrompt onClick={setInput}>解释一下什么是 LFO</QuickPrompt>
-            <QuickPrompt onClick={setInput}>做一个明亮的 Lead 并演奏 C 大调音阶</QuickPrompt>          </div>
+            <p className="mb-3 uppercase tracking-wider text-[10px]">Try asking</p>
+            <QuickPrompt onClick={setInput}>Make me a warm pad sound</QuickPrompt>
+            <QuickPrompt onClick={setInput}>The sound is too harsh — soften it</QuickPrompt>
+            <QuickPrompt onClick={setInput}>Explain what an LFO does</QuickPrompt>
+            <QuickPrompt onClick={setInput}>Create a bright lead and play a C major scale</QuickPrompt>          </div>
         )}
 
         {messages.map((msg) => (
@@ -341,19 +341,19 @@ export default function AgentPanel() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="描述你想要的音色，或问我任何问题..."
+            placeholder="Describe the sound you want, or ask anything..."
             rows={3}
             className="w-full bg-bg-tertiary border border-border-default rounded px-3 py-2 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-border-active resize-none font-sans"
           />
           <div className="flex justify-between items-center">
-            <span className="text-[10px] text-text-muted">Enter 发送 · Shift+Enter 换行</span>
+            <span className="text-[10px] text-text-muted">Enter to send · Shift+Enter for newline</span>
             {isLoading ? (
               <button
                 onClick={cancelStream}
                 className="px-4 py-1.5 bg-accent-red/80 text-white text-xs font-medium hover:bg-accent-red transition-colors rounded"
-                title="中断当前生成"
+                title="Abort the current generation"
               >
-                ■ 停止
+                ■ Stop
               </button>
             ) : (
               <button
@@ -361,7 +361,7 @@ export default function AgentPanel() {
                 disabled={!input.trim()}
                 className="px-4 py-1.5 bg-text-primary text-bg-tertiary text-xs font-medium hover:bg-text-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded"
               >
-                发送
+                Send
               </button>
             )}
           </div>
@@ -444,17 +444,17 @@ function MessageItem({
 
       {/* Cancelled marker + token usage */}
       {message.cancelled && (
-        <div className="mt-1 text-[10px] text-text-muted">■ 已停止</div>
+        <div className="mt-1 text-[10px] text-text-muted">■ Stopped</div>
       )}
       {(message.usage || message.turnMs !== undefined) && (
         <div className="mt-1 text-[10px] text-text-muted">
           {!!message.usage && message.usage.prompt + message.usage.completion > 0 && (
             <span>
               tokens {message.usage.prompt + message.usage.completion}
-              （输入 {message.usage.prompt} / 输出 {message.usage.completion}）
+              {' '}(in {message.usage.prompt} / out {message.usage.completion})
             </span>
           )}
-          {message.turnMs !== undefined && <span> 耗时 {(message.turnMs / 1000).toFixed(1)}s</span>}
+          {message.turnMs !== undefined && <span> · {(message.turnMs / 1000).toFixed(1)}s</span>}
         </div>
       )}
 
@@ -462,7 +462,7 @@ function MessageItem({
       {!hasContent && message.streaming && !hasThinking && (
         <div className="text-text-muted text-xs flex items-center gap-2">
           <span className="streaming-caret" />
-          <span>思考中</span>
+          <span>Thinking</span>
         </div>
       )}
     </div>
@@ -491,7 +491,7 @@ function PlanCard({
       }`}
     >
       <div className="text-[10px] uppercase tracking-wider text-text-muted mb-1">
-        📋 {plan.title}
+        Plan · {plan.title}
       </div>
       <ol className="text-xs text-text-secondary space-y-0.5 mb-2 list-decimal list-inside">
         {plan.steps.map((step, i) => (
@@ -505,19 +505,19 @@ function PlanCard({
             disabled={disabled}
             className="px-3 py-1 text-[11px] rounded border border-accent-cyan/50 bg-accent-cyan/15 text-accent-cyan hover:bg-accent-cyan/25 transition-colors disabled:opacity-40"
           >
-            ✓ 确认执行
+            Confirm & run
           </button>
           <button
             onClick={() => onRespond(false)}
             disabled={disabled}
             className="px-3 py-1 text-[11px] rounded border border-border-default text-text-muted hover:text-text-secondary transition-colors disabled:opacity-40"
           >
-            ✕ 取消
+            Cancel
           </button>
         </div>
       ) : (
         <div className="text-[10px] text-text-muted">
-          {status === 'confirmed' ? '✓ 已确认，执行中' : '✕ 已取消'}
+          {status === 'confirmed' ? 'Confirmed — running' : 'Cancelled'}
         </div>
       )}
     </div>
@@ -535,25 +535,35 @@ function ToolCallSection({
   playCommands?: PlayCommand[];
   streaming?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  // Collapsed by default — the header streams a live one-line status while
+  // the agent works; expand for the full chronological step list.
+  const [expanded, setExpanded] = useState(false);
   const thinkingCount = thinking?.length ?? 0;
   const mutationCount = mutations?.length ?? 0;
   const playCount = playCommands?.length ?? 0;
+  const lastTool = thinking && thinking.length > 0 ? thinking[thinking.length - 1].tool : null;
 
   return (
     <div className="mb-3 border border-border-default rounded bg-bg-tertiary">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-3 py-2 text-[10px] uppercase tracking-wider text-text-secondary hover:bg-bg-hover transition-colors rounded-t"
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-[10px] uppercase tracking-wider text-text-secondary hover:bg-bg-hover transition-colors rounded"
       >
-        <span className="flex items-center gap-3">
-          <span className="text-text-muted">{expanded ? '▾' : '▸'}</span>
-          <span>Tool Calls</span>
-          <span className="text-text-muted normal-case tracking-normal">
-            {thinkingCount} 步 · {mutationCount} 改 · {playCount} 弹
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="text-text-muted flex-shrink-0">{expanded ? '▾' : '▸'}</span>
+          <span className="flex-shrink-0">Activity</span>
+          <span className="text-text-muted normal-case tracking-normal flex-shrink-0">
+            {thinkingCount} {thinkingCount === 1 ? 'step' : 'steps'}
+            {mutationCount > 0 && ` · ${mutationCount} edited`}
+            {playCount > 0 && ` · ${playCount} played`}
           </span>
+          {!expanded && streaming && lastTool && (
+            <span className="text-text-muted normal-case tracking-normal truncate">
+              — {lastTool}
+            </span>
+          )}
         </span>
-        {streaming && <span className="streaming-caret" />}
+        {streaming && <span className="streaming-caret flex-shrink-0" />}
       </button>
 
       {expanded && (

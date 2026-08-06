@@ -85,8 +85,9 @@ export default function SequencerPanel() {
           Clear
         </button>
 
-        <span className="text-[10px] text-text-muted ml-auto">
-          <span style={{ color: track.color }}>●</span> {track.name} · {pattern.notes.length} notes
+        <span className="text-[10px] text-text-muted ml-auto flex items-center gap-1.5">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-text-primary" />
+          {track.name} · {pattern.notes.length} notes
         </span>
       </div>
 

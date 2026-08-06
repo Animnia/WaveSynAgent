@@ -91,7 +91,7 @@ export async function renderMixToWav(
   );
   const active = tracks.filter((_, i) => audible.has(String(i)));
   if (active.length === 0) {
-    throw new Error('没有可导出的音轨（全部被静音）');
+    throw new Error('Nothing to export — all tracks are muted');
   }
 
   // Global BPM: the shared Transport has one clock — use the first audible
