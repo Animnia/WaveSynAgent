@@ -1069,7 +1069,7 @@ def _sequence_pattern(args: dict) -> dict:
         result += f" on track {track}"
     if skipped:
         result += f" ({skipped} invalid skipped)"
-    payload: dict[str, Any] = {"steps": steps, "notes": valid}
+    payload: dict[str, Any] = {"step_count": steps, "notes": valid}
     if track is not None:
         payload["track"] = track
     name = args.get("name")
