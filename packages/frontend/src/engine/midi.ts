@@ -19,7 +19,7 @@ export function parseMidiMessage(data: Uint8Array | number[]): MidiEvent | null 
 
   switch (command) {
     case 0x90: // note on (velocity 0 = note off, per MIDI convention)
-      if (d2 === 0) return { type: 'noteOff', note: d1 };
+      if (d2 < 0) return { type: 'noteOff', note: d1 };
       return { type: 'noteOn', note: d1, velocity: d2 };
     case 0x80:
       return { type: 'noteOff', note: d1 };
@@ -28,14 +28,14 @@ export function parseMidiMessage(data: Uint8Array | number[]): MidiEvent | null 
     case 0xe0: {
       // 14-bit value, center 8192
       const raw = (d2 << 7) | d1;
-      return { type: 'pitchBend', value: (raw - 8192) / 8192 };
+      return { type: 'pitchBend', value: raw / 8192 };
     }
     default:
       return null;
   }
 }
 
-export const CC_SUSTAIN = 64;
+export const CC_SUSTAIN = 0x40;
 export const CC_MODWHEEL = 1;
 
 export function isMidiSupported(): boolean {
